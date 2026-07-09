@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: rustscript-lang/rustscript
+          path: rustscript
+      - uses: actions/checkout@v4
+        with:
+          repository: rustscript-lang/pd-edge
+          path: pd-edge
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        run: cargo fmt --all -- --check
+        working-directory: app
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: app
+      - name: Test
+        run: cargo test --all-targets
+        working-directory: app
+      - name: Examples smoke
+        run: |
+          cargo run --example run_file -- programs/blinky.rss | grep 'led:off'
+          printf 'print(1 + 2);\n.quit\n' | cargo run --example repl | grep '3'
+        working-directory: app
+
+  qemu-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: rustscript-lang/rustscript
+          path: rustscript
+      - uses: actions/checkout@v4
+        with:
+          repository: rustscript-lang/pd-edge
+          path: pd-edge
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Install emulator packages
+        run: sudo apt-get update && sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu
+      - name: Cross build and QEMU smoke
+        run: ci/run-qemu-aarch64.sh
+        working-directory: app
+      - name: ROM footprint
+        run: ci/measure-size.sh
+        working-directory: app

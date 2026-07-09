@@ -1,0 +1,12 @@
+let mut led = false;
+let mut ticks = 0;
+while ticks < 4 {
+    led = !led;
+    ticks = ticks + 1;
+}
+
+if led {
+    print("led:on");
+} else {
+    print("led:off");
+}
