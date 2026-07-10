@@ -1,0 +1,22 @@
+fn gpio_mode(pin: int, mode: int);
+fn gpio_write(pin: int, high: bool);
+fn gpio_read(pin: int) -> bool;
+fn delay_ms(milliseconds: int);
+fn serial_write(message: string);
+
+let led_pin = 8;
+gpio_mode(led_pin, 1);
+let mut high = false;
+let mut count = 0;
+while count < 4 {
+    high = !high;
+    gpio_write(led_pin, high);
+    delay_ms(100);
+    count = count + 1;
+}
+
+if gpio_read(led_pin) {
+    serial_write("micro-rustscript:gpio=high");
+} else {
+    serial_write("micro-rustscript:gpio=low");
+}

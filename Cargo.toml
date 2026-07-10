@@ -2,7 +2,7 @@
 name = "rustscript-embedded"
 version = "0.1.0"
 edition = "2024"
-description = "Embedded-facing RustScript runner examples with JIT disabled"
+description = "Embedded RustScript VMBC runtime with a no_std host-function ABI"
 license = "MIT"
 homepage = "https://rustscript.org/"
 repository = "https://github.com/rustscript-lang/micro-rustscript"
@@ -10,14 +10,19 @@ repository = "https://github.com/rustscript-lang/micro-rustscript"
 [lib]
 crate-type = ["rlib", "staticlib"]
 
+[[bin]]
+name = "rustscript-compile-vmbc"
+path = "src/bin/rustscript-compile-vmbc.rs"
+required-features = ["host"]
+
 [features]
 default = ["host"]
 host = ["dep:vm", "vm/runtime"]
-rp2040 = ["dep:pd_vm_nostd"]
+esp32 = ["dep:pd_vm_nostd"]
 
 [dependencies]
-pd_vm_nostd = { package = "pd-vm-nostd", path = "../rustscript/pd-vm-nostd", version = "0.1.0", optional = true }
-vm = { package = "pd-vm", path = "../rustscript", version = "0.1.0", default-features = false, optional = true }
+pd_vm_nostd = { package = "pd-vm-nostd", git = "https://github.com/rustscript-lang/rustscript.git", rev = "ab04637a9b6192dd4f37b7e6abe4dde83f2fc710", version = "0.1.0", optional = true }
+vm = { package = "pd-vm", git = "https://github.com/rustscript-lang/rustscript.git", rev = "ab04637a9b6192dd4f37b7e6abe4dde83f2fc710", version = "0.1.0", default-features = false, optional = true }
 
 [profile.release]
 opt-level = "z"

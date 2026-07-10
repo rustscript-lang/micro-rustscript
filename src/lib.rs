@@ -2,14 +2,14 @@
 
 extern crate alloc;
 
-#[cfg(all(feature = "rp2040", target_os = "none"))]
+#[cfg(all(feature = "esp32", target_os = "none"))]
 mod allocator;
-#[cfg(feature = "rp2040")]
+#[cfg(feature = "esp32")]
 mod ffi;
 #[cfg(feature = "host")]
 mod host;
 
-#[cfg(feature = "rp2040")]
+#[cfg(feature = "esp32")]
 pub use ffi::{
     RustScriptHostCallback, RustScriptValue, RustScriptValueError, RustScriptValueTag,
     rustscript_run_vmbc,

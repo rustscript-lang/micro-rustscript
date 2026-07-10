@@ -1,0 +1,54 @@
+name: ESP32 firmware release
+
+on:
+  push:
+    tags:
+      - 'esp32-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: llvm-tools-preview
+          targets: riscv32imc-unknown-none-elf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install platformio==6.1.19
+      - name: Build factory image
+        run: pio run
+        working-directory: app
+      - name: Prepare release assets
+        run: |
+          cp .pio/build/esp32-c3-devkitm-1/firmware.elf dist/micro-rustscript-esp32-c3.elf
+          cp .pio/generated/esp32-blinky.vmbc dist/esp32-blinky.vmbc
+          cd dist
+          sha256sum micro-rustscript-esp32-c3.factory.bin micro-rustscript-esp32-c3.elf esp32-blinky.vmbc > SHA256SUMS
+        working-directory: app
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: micro-rustscript ESP32-C3 ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            Directly flashable ESP32-C3-DevKitM-1 image with `pd-vm-nostd` and RSS GPIO host functions.
+
+            Flash at offset `0x0`:
+            ```bash
+            python -m esptool --chip esp32c3 erase_flash
+            python -m esptool --chip esp32c3 write_flash 0x0 micro-rustscript-esp32-c3.factory.bin
+            ```
+          files: |
+            app/dist/micro-rustscript-esp32-c3.factory.bin
+            app/dist/micro-rustscript-esp32-c3.elf
+            app/dist/esp32-blinky.vmbc
+            app/dist/SHA256SUMS
