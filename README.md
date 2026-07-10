@@ -2,42 +2,48 @@
 
 [![rustscript-embedded on crates.io](https://img.shields.io/crates/v/rustscript-embedded.svg)](https://crates.io/crates/rustscript-embedded)
 
-A small RustScript runner for embedded-facing host and constrained-target experiments. The published crate remains `rustscript-embedded`; the host examples use `pd-vm` with `default-features = false`, only the `runtime` feature, and JIT disabled.
+A small RustScript runner for embedded and constrained targets. The published Cargo package remains
+`rustscript-embedded`; `micro-rustscript` is the project name used in public documentation.
 
 ## Host examples
+
+The default branch keeps host-side runner examples with JIT disabled:
 
 ```bash
 cargo run --example run_file -- programs/blinky.rss
 printf 'print(1 + 2);\n.quit\n' | cargo run --example repl
 ```
 
-## Raspberry Pi Zero bare-metal scenario
+## RP2040 / Raspberry Pi Pico
 
-The board scenario targets Raspberry Pi Zero revision 1.2: BCM2835 with ARM1176JZF-S, booted without an OS under QEMU's `raspi0` machine.
+The first real MCU integration is developed on
+[`feat/rp2040-platformio`](https://github.com/rustscript-lang/rustscript-embedded/tree/feat/rp2040-platformio).
+It links the `pd-vm` `no_std + alloc` VMBC interpreter into an Arduino-Pico firmware through a narrow
+C ABI. RustScript source is compiled to VMBC on the host; GPIO, delay, serial output, and allocation
+remain owned by the PlatformIO application.
 
 ```bash
-ci/run-qemu-raspi0.sh
-ci/measure-size.sh
+git switch feat/rp2040-platformio
+rustup target add thumbv6m-none-eabi
+uv tool install platformio
+pio run -d platformio/rp2040
 ```
 
-The firmware in `ports/raspi-zero/` contains a tiny frozen-program interpreter for a RustScript-flavored bytecode form of `programs/blinky.rss`. It prints over the BCM2835 PL011 UART and has no JIT path. This board smoke target measures the frozen bytecode firmware only; it does not represent a full `pd-vm` firmware image.
+That branch builds a real ELF and UF2 containing `rustscript_run_vmbc`, the compact interpreter, and
+the embedded VMBC program. CI publishes both firmware artifacts.
 
-## CI shape borrowed from MicroPython
+## Raspberry Pi Zero note
 
-MicroPython keeps a central `tools/ci.sh`, has per-port workflows, runs QEMU ports across ARM/RISC-V boards, and has a separate code-size workflow based on `tools/metrics.py`. This project mirrors that shape at a small scale:
-
-- host job: format, clippy, tests, native example smoke
-- target job: install `arm-none-eabi` + QEMU, build the Raspberry Pi Zero bare-metal firmware, run it under QEMU
-- size step: report ELF section footprint and raw image bytes
+The older `ports/raspi-zero` files on the default branch are a frozen-bytecode board smoke target.
+They do not contain `pd-vm` and must not be used as evidence of a full RustScript bare-metal runtime.
+Use the RP2040 branch for the maintained `no_std` integration.
 
 ## Size controls
 
-Host `min-size` profile uses:
+Release profiles use:
 
 - `opt-level = "z"`
 - `lto = "fat"`
 - `codegen-units = 1`
 - `panic = "abort"`
 - `strip = "symbols"`
-
-The Pi Zero firmware uses `-Os`, `-ffunction-sections`, `-fdata-sections`, `-nostdlib`, and linker `--gc-sections`.
