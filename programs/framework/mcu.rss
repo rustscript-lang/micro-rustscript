@@ -1,0 +1,50 @@
+fn __esp32_mcu_delay_ms(milliseconds: int) -> null;
+fn __esp32_mcu_delay_us(microseconds: int) -> null;
+fn __esp32_mcu_millis() -> int;
+fn __esp32_mcu_micros() -> int;
+fn __esp32_mcu_cpu_frequency_mhz() -> int;
+fn __esp32_mcu_free_heap() -> int;
+fn __esp32_mcu_flash_size() -> int;
+fn __esp32_mcu_random() -> int;
+fn __esp32_mcu_restart() -> null;
+fn __esp32_mcu_deep_sleep_us(microseconds: int) -> null;
+
+pub fn delay_ms(milliseconds: int) -> null {
+    __esp32_mcu_delay_ms(milliseconds)
+}
+
+pub fn delay_us(microseconds: int) -> null {
+    __esp32_mcu_delay_us(microseconds)
+}
+
+pub fn millis() -> int {
+    __esp32_mcu_millis()
+}
+
+pub fn micros() -> int {
+    __esp32_mcu_micros()
+}
+
+pub fn cpu_frequency_mhz() -> int {
+    __esp32_mcu_cpu_frequency_mhz()
+}
+
+pub fn free_heap() -> int {
+    __esp32_mcu_free_heap()
+}
+
+pub fn flash_size() -> int {
+    __esp32_mcu_flash_size()
+}
+
+pub fn random() -> int {
+    __esp32_mcu_random()
+}
+
+pub fn restart() -> null {
+    __esp32_mcu_restart()
+}
+
+pub fn deep_sleep_us(microseconds: int) -> null {
+    __esp32_mcu_deep_sleep_us(microseconds)
+}

@@ -7,7 +7,7 @@ use pd_vm_nostd::Value as NoStdValue;
 use rustscript_embedded::{
     RustScriptHostCallback, RustScriptValue, RustScriptValueTag, rustscript_run_vmbc,
 };
-use vm::{compile_source, encode_program};
+use vm::{compile_source, compile_source_file, encode_program};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 struct BoardState {
@@ -32,16 +32,16 @@ unsafe extern "C" fn host_callback(
     let name = unsafe { slice::from_raw_parts(name, name_len) };
     let args = unsafe { slice::from_raw_parts(args, arg_count) };
     match name {
-        b"gpio_mode"
+        b"__esp32_gpio_configure"
             if args.len() == 2
                 && args[0].tag == RustScriptValueTag::Int as u8
                 && args[1].tag == RustScriptValueTag::Int as u8 =>
         {
             state.pin = args[0].integer;
             state.mode = args[1].integer;
-            0
+            unsafe { set_bool_result(result, true) }
         }
-        b"gpio_write"
+        b"__esp32_gpio_write"
             if args.len() == 2
                 && args[0].tag == RustScriptValueTag::Int as u8
                 && args[1].tag == RustScriptValueTag::Bool as u8 =>
@@ -49,26 +49,22 @@ unsafe extern "C" fn host_callback(
             state.pin = args[0].integer;
             state.high = args[1].boolean != 0;
             state.gpio_writes += 1;
-            0
+            unsafe { set_bool_result(result, true) }
         }
-        b"gpio_read" if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 => {
-            if result.is_null() {
-                return -1;
-            }
+        b"__esp32_gpio_read" if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 => {
             state.pin = args[0].integer;
             state.gpio_reads += 1;
-            unsafe {
-                *result = RustScriptValue::null();
-                (*result).tag = RustScriptValueTag::Bool as u8;
-                (*result).boolean = u8::from(state.high);
-            }
-            1
+            unsafe { set_bool_result(result, state.high) }
         }
-        b"delay_ms" if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 => {
+        b"__esp32_mcu_delay_ms"
+            if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 =>
+        {
             state.delayed_ms += args[0].integer;
             0
         }
-        b"serial_write" if args.len() == 1 && args[0].tag == RustScriptValueTag::String as u8 => {
+        b"__esp32_serial_write"
+            if args.len() == 1 && args[0].tag == RustScriptValueTag::String as u8 =>
+        {
             if args[0].len != 0 && args[0].data.is_null() {
                 return -1;
             }
@@ -78,6 +74,18 @@ unsafe extern "C" fn host_callback(
         }
         _ => -1,
     }
+}
+
+unsafe fn set_bool_result(result: *mut RustScriptValue, value: bool) -> i32 {
+    if result.is_null() {
+        return -1;
+    }
+    unsafe {
+        *result = RustScriptValue::null();
+        (*result).tag = RustScriptValueTag::Bool as u8;
+        (*result).boolean = u8::from(value);
+    }
+    1
 }
 
 fn compile_vmbc(source: &str) -> Vec<u8> {
@@ -108,8 +116,8 @@ fn scalar_ffi_values_round_trip() {
 fn c_abi_runs_vmbc_and_dispatches_host_call() {
     let bytes = compile_vmbc(
         r#"
-            fn gpio_write(pin: int, high: bool);
-            gpio_write(8, true);
+            fn __esp32_gpio_write(pin: int, high: bool) -> bool;
+            let ok: bool = __esp32_gpio_write(8, true);
         "#,
     );
     let mut state = BoardState::default();
@@ -133,7 +141,9 @@ fn c_abi_runs_vmbc_and_dispatches_host_call() {
 
 #[test]
 fn esp32_program_runs_through_real_ffi_path() {
-    let bytes = compile_vmbc(include_str!("../programs/esp32-blinky.rss"));
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs/esp32-blinky.rss");
+    let compiled = compile_source_file(&source).expect("ESP32 program should compile");
+    let bytes = encode_program(&compiled.program).expect("program should encode");
     let mut state = BoardState::default();
 
     let status = unsafe {
@@ -154,6 +164,39 @@ fn esp32_program_runs_through_real_ffi_path() {
     assert_eq!(state.gpio_reads, 1);
     assert_eq!(state.delayed_ms, 400);
     assert_eq!(state.serial, b"micro-rustscript:gpio=low");
+}
+
+#[test]
+fn framework_modules_compile_to_private_board_imports() {
+    let source =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs/framework-api-smoke.rss");
+    let compiled = compile_source_file(&source).expect("framework API should compile");
+    let imports = compiled
+        .program
+        .imports
+        .iter()
+        .map(|import| import.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for expected in [
+        "__esp32_gpio_configure",
+        "__esp32_gpio_write",
+        "__esp32_gpio_read",
+        "__esp32_gpio_analog_read",
+        "__esp32_gpio_pwm",
+        "__esp32_i2c_begin",
+        "__esp32_i2c_end",
+        "__esp32_i2c_write",
+        "__esp32_i2c_write_register",
+        "__esp32_i2c_read",
+        "__esp32_i2c_read_register",
+        "__esp32_mcu_delay_ms",
+        "__esp32_mcu_free_heap",
+        "__esp32_serial_write",
+        "__esp32_serial_read",
+    ] {
+        assert!(imports.contains(expected), "missing host import {expected}");
+    }
 }
 
 #[test]

@@ -31,8 +31,10 @@ jobs:
         run: |
           cp .pio/build/esp32-c3-devkitm-1/firmware.elf dist/micro-rustscript-esp32-c3.elf
           cp .pio/generated/esp32-blinky.vmbc dist/esp32-blinky.vmbc
+          cp .pio/generated/rustscript.partition.bin dist/rustscript.partition.bin
+          cp scripts/flash_vmbc.py scripts/vmbc_image.py scripts/repl_vmbc.py partitions.csv dist/
           cd dist
-          sha256sum micro-rustscript-esp32-c3.factory.bin micro-rustscript-esp32-c3.elf esp32-blinky.vmbc > SHA256SUMS
+          sha256sum micro-rustscript-esp32-c3.factory.bin micro-rustscript-esp32-c3.elf esp32-blinky.vmbc rustscript.partition.bin flash_vmbc.py vmbc_image.py repl_vmbc.py partitions.csv > SHA256SUMS
         working-directory: app
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -40,7 +42,7 @@ jobs:
           name: micro-rustscript ESP32-C3 ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            Directly flashable ESP32-C3-DevKitM-1 image with `pd-vm-nostd` and RSS GPIO host functions.
+            Directly flashable ESP32-C3-DevKitM-1 image with namespaced GPIO, I2C, MCU, and serial framework APIs. Startup checks SD, then the dedicated VMBC partition, then opens the serial VMBC REPL.
 
             Flash at offset `0x0`:
             ```bash
@@ -51,4 +53,9 @@ jobs:
             app/dist/micro-rustscript-esp32-c3.factory.bin
             app/dist/micro-rustscript-esp32-c3.elf
             app/dist/esp32-blinky.vmbc
+            app/dist/rustscript.partition.bin
+            app/dist/flash_vmbc.py
+            app/dist/vmbc_image.py
+            app/dist/repl_vmbc.py
+            app/dist/partitions.csv
             app/dist/SHA256SUMS

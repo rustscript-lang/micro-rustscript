@@ -30,6 +30,11 @@ jobs:
       - name: Test embedded host-function ABI
         run: cargo test --features esp32
         working-directory: app
+      - name: Test VMBC partition packer
+        run: |
+          python scripts/flash_vmbc.py programs/esp32-blinky.rss --output /tmp/rustscript.partition.bin
+          test -s /tmp/rustscript.partition.bin
+        working-directory: app
       - name: Examples smoke
         run: |
           cargo run --example run_file -- programs/blinky.rss | grep 'led:off'
@@ -60,13 +65,16 @@ jobs:
           test -s .pio/build/esp32-c3-devkitm-1/firmware.elf
           test -s .pio/build/esp32-c3-devkitm-1/firmware.bin
           test -s dist/micro-rustscript-esp32-c3.factory.bin
+          test -s .pio/generated/rustscript.partition.bin
           nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_run_vmbc
-          nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep dispatch_host
+          nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_dispatch_host
+          grep 'rustscript.*0x210000.*0x100000' partitions.csv
           stat --format='%n %s bytes' \
             .pio/build/esp32-c3-devkitm-1/firmware.elf \
             .pio/build/esp32-c3-devkitm-1/firmware.bin \
             dist/micro-rustscript-esp32-c3.factory.bin \
-            .pio/generated/esp32-blinky.vmbc
+            .pio/generated/esp32-blinky.vmbc \
+            .pio/generated/rustscript.partition.bin
         working-directory: app
       - uses: actions/upload-artifact@v4
         with:
@@ -75,3 +83,8 @@ jobs:
             app/dist/micro-rustscript-esp32-c3.factory.bin
             app/.pio/build/esp32-c3-devkitm-1/firmware.elf
             app/.pio/generated/esp32-blinky.vmbc
+            app/.pio/generated/rustscript.partition.bin
+            app/scripts/flash_vmbc.py
+            app/scripts/vmbc_image.py
+            app/scripts/repl_vmbc.py
+            app/partitions.csv

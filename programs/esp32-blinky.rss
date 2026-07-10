@@ -1,22 +1,24 @@
-fn gpio_mode(pin: int, mode: int);
-fn gpio_write(pin: int, high: bool);
-fn gpio_read(pin: int) -> bool;
-fn delay_ms(milliseconds: int);
-fn serial_write(message: string);
+use framework::gpio as gpio;
+use framework::mcu as mcu;
+use framework::serial as serial;
 
 let led_pin = 8;
-gpio_mode(led_pin, 1);
+let configured: bool = gpio::configure(led_pin, 1);
 let mut high = false;
 let mut count = 0;
-while count < 4 {
+while configured && count < 4 {
     high = !high;
-    gpio_write(led_pin, high);
-    delay_ms(100);
-    count = count + 1;
+    let written: bool = gpio::digital_write(led_pin, high);
+    if !written {
+        count = 4;
+    } else {
+        mcu::delay_ms(100);
+        count = count + 1;
+    }
 }
 
-if gpio_read(led_pin) {
-    serial_write("micro-rustscript:gpio=high");
+if gpio::digital_read(led_pin) {
+    serial::write_line("micro-rustscript:gpio=high");
 } else {
-    serial_write("micro-rustscript:gpio=low");
+    serial::write_line("micro-rustscript:gpio=low");
 }

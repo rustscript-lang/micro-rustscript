@@ -1,0 +1,30 @@
+use framework::gpio as gpio;
+use framework::i2c as i2c;
+use framework::mcu as mcu;
+use framework::serial as serial;
+
+let configured: bool = gpio::configure(8, 1);
+let written: bool = gpio::digital_write(8, configured);
+let level: bool = gpio::digital_read(8);
+let analog: int = gpio::analog_read(0);
+let pwm: bool = gpio::pwm_write(8, 128, 5000, 8);
+
+let opened: bool = i2c::open(8, 9, 400000);
+let tx: int = i2c::transmit(0x3c, b"x");
+let txr: int = i2c::transmit_register(0x3c, 0, b"x");
+let rx: bytes = i2c::receive(0x3c, 1);
+let rxr: bytes = i2c::receive_register(0x3c, 0, 1);
+i2c::close();
+
+mcu::delay_ms(1);
+mcu::delay_us(1);
+let uptime_ms: int = mcu::millis();
+let uptime_us: int = mcu::micros();
+let cpu: int = mcu::cpu_frequency_mhz();
+let heap: int = mcu::free_heap();
+let flash: int = mcu::flash_size();
+let random_value: int = mcu::random();
+
+serial::write_line("framework-api");
+let waiting: int = serial::available();
+let input: bytes = serial::read_bytes(1);

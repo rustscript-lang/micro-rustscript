@@ -1,0 +1,16 @@
+fn __esp32_serial_write(message: string) -> null;
+fn __esp32_serial_available() -> int;
+fn __esp32_serial_read(length: int) -> bytes;
+
+pub fn write_line(message: string) -> null {
+    __esp32_serial_write(message)
+}
+
+pub fn available() -> int {
+    __esp32_serial_available()
+}
+
+// Reads at most 255 bytes without waiting for more input.
+pub fn read_bytes(length: int) -> bytes {
+    __esp32_serial_read(length)
+}

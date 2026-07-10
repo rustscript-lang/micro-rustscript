@@ -3,15 +3,20 @@ Import("env")
 import os
 import pathlib
 import subprocess
+import sys
 
 PROJECT_DIR = pathlib.Path(env.subst("$PROJECT_DIR")).resolve()
 TARGET_DIR = PROJECT_DIR / ".pio" / "rust-target"
 GENERATED_DIR = PROJECT_DIR / ".pio" / "generated"
 SOURCE = PROJECT_DIR / "programs" / "esp32-blinky.rss"
 VMBC = GENERATED_DIR / "esp32-blinky.vmbc"
-HEADER = GENERATED_DIR / "program_vmbc.h"
+SCRIPT_IMAGE = GENERATED_DIR / "rustscript.partition.bin"
+PARTITIONS = PROJECT_DIR / "partitions.csv"
 RUST_TARGET = "riscv32imc-unknown-none-elf"
 ARCHIVE = TARGET_DIR / RUST_TARGET / "release" / "librustscript_embedded.a"
+
+sys.path.insert(0, str(PROJECT_DIR / "scripts"))
+from vmbc_image import find_partition, pack_vmbc
 
 
 def run(command, cwd, environment=None):
@@ -25,32 +30,6 @@ def command_output(command, cwd, environment=None):
     clean_env = os.environ.copy() if environment is None else environment.copy()
     clean_env.pop("RUSTFLAGS", None)
     return subprocess.check_output(command, cwd=cwd, env=clean_env, text=True).strip()
-
-
-def write_header(payload):
-    rows = []
-    for offset in range(0, len(payload), 12):
-        chunk = payload[offset : offset + 12]
-        rows.append("    " + ", ".join(f"0x{byte:02x}" for byte in chunk) + ",")
-    content = "\n".join(
-        [
-            "#ifndef RUSTSCRIPT_PROGRAM_VMBC_H",
-            "#define RUSTSCRIPT_PROGRAM_VMBC_H",
-            "",
-            "#include <stddef.h>",
-            "#include <stdint.h>",
-            "",
-            "static const uint8_t RUSTSCRIPT_PROGRAM_VMBC[] = {",
-            *rows,
-            "};",
-            "static const size_t RUSTSCRIPT_PROGRAM_VMBC_LEN = sizeof(RUSTSCRIPT_PROGRAM_VMBC);",
-            "",
-            "#endif",
-            "",
-        ]
-    )
-    if not HEADER.exists() or HEADER.read_text() != content:
-        HEADER.write_text(content)
 
 
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
@@ -108,7 +87,14 @@ run(
 
 if not VMBC.is_file() or VMBC.stat().st_size == 0:
     raise RuntimeError(f"missing VMBC output: {VMBC}")
-write_header(VMBC.read_bytes())
+script_offset, script_size = find_partition(PARTITIONS)
+SCRIPT_IMAGE.write_bytes(pack_vmbc(VMBC.read_bytes(), script_size))
+print(
+    "micro-rustscript: packed default VMBC partition",
+    SCRIPT_IMAGE,
+    f"(offset 0x{script_offset:x})",
+)
 
-env.Append(CPPPATH=[str(PROJECT_DIR / "include"), str(GENERATED_DIR)])
+env.Append(CPPPATH=[str(PROJECT_DIR / "include")])
 env.Append(LIBS=[env.File(str(ARCHIVE))])
+env.Append(FLASH_EXTRA_IMAGES=[(hex(script_offset), env.File(str(SCRIPT_IMAGE)))])
