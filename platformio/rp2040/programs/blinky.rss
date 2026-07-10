@@ -1,0 +1,13 @@
+fn gpio_set(pin: int, high: bool);
+fn delay_ms(milliseconds: int);
+fn serial_write(message: string);
+
+let mut high = false;
+let mut count = 0;
+while count < 4 {
+    high = !high;
+    gpio_set(25, high);
+    delay_ms(50);
+    count = count + 1;
+}
+serial_write("rustscript:done");

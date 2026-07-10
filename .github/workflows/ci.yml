@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: rustscript-lang/rustscript
+          ref: feat/no-std-runtime
           path: rustscript
       - uses: dtolnay/rust-toolchain@stable
       - name: Format
@@ -35,7 +36,8 @@ jobs:
           printf 'print(1 + 2);\n.quit\n' | cargo run --example repl | grep '3'
         working-directory: app
 
-  raspi-zero:
+  rp2040:
+    name: RP2040 PlatformIO Arduino firmware
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,12 +46,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: rustscript-lang/rustscript
+          ref: feat/no-std-runtime
           path: rustscript
-      - name: Install bare-metal emulator packages
-        run: sudo apt-get update && sudo apt-get install -y qemu-system-arm gcc-arm-none-eabi binutils-arm-none-eabi
-      - name: Build and run Raspberry Pi Zero bare-metal demo
-        run: ci/run-qemu-raspi0.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Build Rust static library
+        run: cargo build --release --target thumbv6m-none-eabi --no-default-features --features rp2040
         working-directory: app
-      - name: ROM footprint
-        run: ci/measure-size.sh
+      - name: Build Arduino-Pico firmware
+        run: pio run -d platformio/rp2040
         working-directory: app
+      - name: Verify firmware artifacts
+        run: |
+          test -s platformio/rp2040/.pio/build/pico/firmware.elf
+          test -s platformio/rp2040/.pio/build/pico/firmware.uf2
+          nm -C platformio/rp2040/.pio/build/pico/firmware.elf | grep rustscript_run_vmbc
+          stat --format='%n %s bytes' \
+            platformio/rp2040/.pio/build/pico/firmware.elf \
+            platformio/rp2040/.pio/build/pico/firmware.uf2 \
+            platformio/rp2040/generated/blinky.vmbc
+        working-directory: app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustscript-rp2040-pico
+          path: |
+            app/platformio/rp2040/.pio/build/pico/firmware.elf
+            app/platformio/rp2040/.pio/build/pico/firmware.uf2
