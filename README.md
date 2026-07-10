@@ -1,8 +1,8 @@
-# rustscript-embedded
+# micro-rustscript
 
 [![rustscript-embedded on crates.io](https://img.shields.io/crates/v/rustscript-embedded.svg)](https://crates.io/crates/rustscript-embedded)
 
-Embedded RustScript runners for host development and constrained targets.
+A small RustScript VMBC runner for embedded and constrained targets.
 
 ## Host examples
 
