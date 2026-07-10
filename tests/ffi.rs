@@ -1,3 +1,5 @@
+#![cfg(feature = "rp2040")]
+
 use std::ffi::c_void;
 use std::slice;
 
