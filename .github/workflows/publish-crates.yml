@@ -28,7 +28,9 @@ jobs:
     env:
       PACKAGE_ORDER: rustscript-embedded
       PD_VM_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
-      WORKSPACE_VERSION_OVERRIDES: rustscript-embedded=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }}
+      PD_HOST_FUNCTION_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
+      PD_EDGE_ABI_VERSION: 0.1.1
+      WORKSPACE_VERSION_OVERRIDES: rustscript-embedded=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }} pd-edge=0.1.1
     steps:
       - name: Checkout rustscript-embedded
         uses: actions/checkout@v4
@@ -39,6 +41,11 @@ jobs:
         with:
           repository: rustscript-lang/rustscript
           path: rustscript
+      - name: Checkout pd-edge dependency
+        uses: actions/checkout@v4
+        with:
+          repository: rustscript-lang/pd-edge
+          path: pd-edge
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Publish crates
@@ -68,6 +75,8 @@ jobs:
           dep_versions = {
               'rustscript-embedded': version,
               'pd-vm': os.environ.get('PD_VM_VERSION') or version,
+              'pd-host-function': os.environ.get('PD_HOST_FUNCTION_VERSION') or version,
+              'pd-edge-abi': os.environ.get('PD_EDGE_ABI_VERSION') or version,
           }
           workspace_versions = {}
           for item in os.environ.get('WORKSPACE_VERSION_OVERRIDES', '').split():
