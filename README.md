@@ -1,8 +1,8 @@
-# rustscript-embedded
+# micro-rustscript
 
 [![rustscript-embedded on crates.io](https://img.shields.io/crates/v/rustscript-embedded.svg)](https://crates.io/crates/rustscript-embedded)
 
-Embedded-facing RustScript runner samples. The host crate uses `pd-vm` with `default-features = false` and only the `runtime` feature, so the CLI, protocol host layers, and Cranelift JIT dependencies are left out. Runtime instances are created with `JitConfig { enabled: false, .. }`.
+A small RustScript runner for embedded-facing host and constrained-target experiments. The published crate remains `rustscript-embedded`; the host examples use `pd-vm` with `default-features = false`, only the `runtime` feature, and JIT disabled.
 
 ## Host examples
 
