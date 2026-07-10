@@ -1,5 +1,7 @@
 # rustscript-embedded
 
+[![rustscript-embedded on crates.io](https://img.shields.io/crates/v/rustscript-embedded.svg)](https://crates.io/crates/rustscript-embedded)
+
 Embedded-facing RustScript runner samples. The host crate uses `pd-vm` with `default-features = false` and only the `runtime` feature, so the CLI, protocol host layers, and Cranelift JIT dependencies are left out. Runtime instances are created with `JitConfig { enabled: false, .. }`.
 
 ## Host examples
@@ -18,7 +20,7 @@ ci/run-qemu-raspi0.sh
 ci/measure-size.sh
 ```
 
-The firmware in `ports/raspi-zero/` contains a tiny frozen-program interpreter for a RustScript-flavored bytecode form of `programs/blinky.rss`. It prints over the BCM2835 PL011 UART and has no JIT path.
+The firmware in `ports/raspi-zero/` contains a tiny frozen-program interpreter for a RustScript-flavored bytecode form of `programs/blinky.rss`. It prints over the BCM2835 PL011 UART and has no JIT path. This board smoke target measures the frozen bytecode firmware only; it does not represent a full `pd-vm` firmware image.
 
 ## CI shape borrowed from MicroPython
 
