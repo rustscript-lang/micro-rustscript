@@ -37,8 +37,8 @@ platformio/rp2040/.pio/build/pico/firmware.elf
 platformio/rp2040/.pio/build/pico/firmware.uf2
 ```
 
-The first verified PlatformIO build reports 87,900 flash bytes and 12,668 RAM bytes. The UF2
-container is 200,192 bytes. These figures include Arduino-Pico, the RustScript VMBC decoder and
+The verified clean-checkout PlatformIO build reports 87,940 flash bytes and 12,668 RAM bytes. The
+UF2 container is 200,192 bytes. These figures include Arduino-Pico, the RustScript VMBC decoder and
 interpreter, the allocator bridge, host callbacks, and the embedded 780-byte VMBC program.
 
 ## Integration shape
