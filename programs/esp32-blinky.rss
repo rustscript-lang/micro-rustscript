@@ -1,6 +1,6 @@
-use framework::gpio as gpio;
-use framework::mcu as mcu;
-use framework::serial as serial;
+use gpio;
+use mcu;
+use serial;
 
 let led_pin = 8;
 let configured: bool = gpio::configure(led_pin, 1);

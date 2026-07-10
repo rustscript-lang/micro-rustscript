@@ -32,7 +32,7 @@ unsafe extern "C" fn host_callback(
     let name = unsafe { slice::from_raw_parts(name, name_len) };
     let args = unsafe { slice::from_raw_parts(args, arg_count) };
     match name {
-        b"__esp32_gpio_configure"
+        b"gpio::configure"
             if args.len() == 2
                 && args[0].tag == RustScriptValueTag::Int as u8
                 && args[1].tag == RustScriptValueTag::Int as u8 =>
@@ -41,7 +41,7 @@ unsafe extern "C" fn host_callback(
             state.mode = args[1].integer;
             unsafe { set_bool_result(result, true) }
         }
-        b"__esp32_gpio_write"
+        b"gpio::digital_write" | b"gpio_digital_write"
             if args.len() == 2
                 && args[0].tag == RustScriptValueTag::Int as u8
                 && args[1].tag == RustScriptValueTag::Bool as u8 =>
@@ -51,18 +51,18 @@ unsafe extern "C" fn host_callback(
             state.gpio_writes += 1;
             unsafe { set_bool_result(result, true) }
         }
-        b"__esp32_gpio_read" if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 => {
+        b"gpio::digital_read"
+            if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 =>
+        {
             state.pin = args[0].integer;
             state.gpio_reads += 1;
             unsafe { set_bool_result(result, state.high) }
         }
-        b"__esp32_mcu_delay_ms"
-            if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 =>
-        {
+        b"mcu::delay_ms" if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 => {
             state.delayed_ms += args[0].integer;
             0
         }
-        b"__esp32_serial_write"
+        b"serial::write_line"
             if args.len() == 1 && args[0].tag == RustScriptValueTag::String as u8 =>
         {
             if args[0].len != 0 && args[0].data.is_null() {
@@ -116,8 +116,8 @@ fn scalar_ffi_values_round_trip() {
 fn c_abi_runs_vmbc_and_dispatches_host_call() {
     let bytes = compile_vmbc(
         r#"
-            fn __esp32_gpio_write(pin: int, high: bool) -> bool;
-            let ok: bool = __esp32_gpio_write(8, true);
+            fn gpio_digital_write(pin: int, high: bool) -> bool;
+            let ok: bool = gpio_digital_write(8, true);
         "#,
     );
     let mut state = BoardState::default();
@@ -167,7 +167,7 @@ fn esp32_program_runs_through_real_ffi_path() {
 }
 
 #[test]
-fn framework_modules_compile_to_private_board_imports() {
+fn framework_namespace_imports_compile_correctly() {
     let source =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs/framework-api-smoke.rss");
     let compiled = compile_source_file(&source).expect("framework API should compile");
@@ -179,21 +179,28 @@ fn framework_modules_compile_to_private_board_imports() {
         .collect::<std::collections::BTreeSet<_>>();
 
     for expected in [
-        "__esp32_gpio_configure",
-        "__esp32_gpio_write",
-        "__esp32_gpio_read",
-        "__esp32_gpio_analog_read",
-        "__esp32_gpio_pwm",
-        "__esp32_i2c_begin",
-        "__esp32_i2c_end",
-        "__esp32_i2c_write",
-        "__esp32_i2c_write_register",
-        "__esp32_i2c_read",
-        "__esp32_i2c_read_register",
-        "__esp32_mcu_delay_ms",
-        "__esp32_mcu_free_heap",
-        "__esp32_serial_write",
-        "__esp32_serial_read",
+        "gpio::configure",
+        "gpio::digital_write",
+        "gpio::digital_read",
+        "gpio::analog_read",
+        "gpio::pwm_write",
+        "i2c::open",
+        "i2c::close",
+        "i2c::transmit",
+        "i2c::transmit_register",
+        "i2c::receive",
+        "i2c::receive_register",
+        "mcu::delay_ms",
+        "mcu::delay_us",
+        "mcu::millis",
+        "mcu::micros",
+        "mcu::cpu_frequency_mhz",
+        "mcu::free_heap",
+        "mcu::flash_size",
+        "mcu::random",
+        "serial::write_line",
+        "serial::available",
+        "serial::read_bytes",
     ] {
         assert!(imports.contains(expected), "missing host import {expected}");
     }

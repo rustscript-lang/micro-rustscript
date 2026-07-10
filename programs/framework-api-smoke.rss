@@ -1,7 +1,7 @@
-use framework::gpio as gpio;
-use framework::i2c as i2c;
-use framework::mcu as mcu;
-use framework::serial as serial;
+use gpio;
+use i2c;
+use mcu;
+use serial;
 
 let configured: bool = gpio::configure(8, 1);
 let written: bool = gpio::digital_write(8, configured);
