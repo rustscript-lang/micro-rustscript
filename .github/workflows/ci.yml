@@ -19,10 +19,6 @@ jobs:
         with:
           repository: rustscript-lang/rustscript
           path: rustscript
-      - uses: actions/checkout@v4
-        with:
-          repository: rustscript-lang/pd-edge
-          path: pd-edge
       - uses: dtolnay/rust-toolchain@stable
       - name: Format
         run: cargo fmt --all -- --check
@@ -49,10 +45,6 @@ jobs:
         with:
           repository: rustscript-lang/rustscript
           path: rustscript
-      - uses: actions/checkout@v4
-        with:
-          repository: rustscript-lang/pd-edge
-          path: pd-edge
       - name: Install bare-metal emulator packages
         run: sudo apt-get update && sudo apt-get install -y qemu-system-arm gcc-arm-none-eabi binutils-arm-none-eabi
       - name: Build and run Raspberry Pi Zero bare-metal demo
