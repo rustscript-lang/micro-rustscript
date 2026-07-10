@@ -74,7 +74,7 @@ jobs:
         working-directory: app
       - uses: actions/upload-artifact@v4
         with:
-          name: rustscript-rp2040-pico
+          name: micro-rustscript-rp2040-pico
           path: |
             app/platformio/rp2040/.pio/build/pico/firmware.elf
             app/platformio/rp2040/.pio/build/pico/firmware.uf2

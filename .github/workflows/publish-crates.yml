@@ -35,12 +35,12 @@ jobs:
       PD_VM_NOSTD_VERSION: ${{ inputs.pd_vm_nostd_version || '0.1.0' }}
       PD_HOST_FUNCTION_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
       PD_EDGE_ABI_VERSION: 0.1.1
-      WORKSPACE_VERSION_OVERRIDES: rustscript-embedded=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }} pd-edge=0.1.1
+      WORKSPACE_VERSION_OVERRIDES: micro-rustscript=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }} pd-edge=0.1.1
     steps:
-      - name: Checkout rustscript-embedded
+      - name: Checkout micro-rustscript
         uses: actions/checkout@v4
         with:
-          path: rustscript-embedded
+          path: micro-rustscript
       - name: Checkout rustscript dependency
         uses: actions/checkout@v4
         with:
@@ -49,7 +49,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Publish crates
-        working-directory: rustscript-embedded
+        working-directory: micro-rustscript
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           INPUT_VERSION: ${{ inputs.version }}
