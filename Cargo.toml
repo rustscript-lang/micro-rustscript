@@ -2,11 +2,11 @@
 name = "rustscript-embedded"
 version = "0.1.0"
 edition = "2024"
-description = "Tiny embedded-facing RustScript runner examples with JIT disabled"
+description = "Embedded-facing RustScript runner examples with JIT disabled"
 license = "MIT"
 
 [dependencies]
-vm = { package = "pd-vm", path = "../rustscript", default-features = false, features = ["runtime"] }
+vm = { package = "pd-vm", path = "../rustscript", version = "0.1.0", default-features = false, features = ["runtime"] }
 
 [profile.release]
 opt-level = "z"
