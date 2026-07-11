@@ -2,6 +2,8 @@ use gpio;
 use i2c;
 use mcu;
 use serial;
+use wifi;
+use bluetooth;
 
 let configured: bool = gpio::configure(8, 1);
 let written: bool = gpio::digital_write(8, configured);
@@ -28,3 +30,13 @@ let random_value: int = mcu::random();
 serial::write_line("framework-api");
 let waiting: int = serial::available();
 let input: bytes = serial::read_bytes(1);
+
+let wifi_started: bool = wifi::connect("ssid", "password");
+let wifi_connected: bool = wifi::is_connected();
+let wifi_rssi: int = wifi::rssi();
+let wifi_ip: string = wifi::local_ip();
+let wifi_stopped: bool = wifi::disconnect();
+
+let bluetooth_started: bool = bluetooth::enable();
+let bluetooth_enabled: bool = bluetooth::is_enabled();
+let bluetooth_stopped: bool = bluetooth::disable();

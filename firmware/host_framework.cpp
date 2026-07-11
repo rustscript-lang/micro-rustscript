@@ -5,8 +5,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
+#ifdef RUSTSCRIPT_FEATURE_BLUETOOTH
+#include "esp_bt.h"
+#endif
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_wifi.h"
+#endif
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "soc/soc_caps.h"
@@ -17,6 +26,12 @@ constexpr size_t MAX_IO_BYTES = 255;
 constexpr size_t PWM_CHANNEL_COUNT = 6;
 uint8_t io_buffer[MAX_IO_BYTES];
 int8_t pwm_pins[PWM_CHANNEL_COUNT] = {-1, -1, -1, -1, -1, -1};
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+constexpr size_t NETWORK_TEXT_CAPACITY = 64;
+char network_text[NETWORK_TEXT_CAPACITY];
+esp_netif_t *wifi_station = nullptr;
+bool wifi_initialized = false;
+#endif
 
 using host_handler = int32_t (*)(const rustscript_value *, rustscript_value *);
 
@@ -33,6 +48,24 @@ bool is_int(const rustscript_value &value) {
 bool is_bytes(const rustscript_value &value) {
     return value.tag == RUSTSCRIPT_VALUE_BYTES && (value.len == 0 || value.data != nullptr);
 }
+
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+bool is_string(const rustscript_value &value) {
+    return value.tag == RUSTSCRIPT_VALUE_STRING &&
+           (value.len == 0 || value.data != nullptr);
+}
+
+bool copy_string(const rustscript_value &value, char *output, size_t capacity) {
+    if (!is_string(value) || value.len >= capacity) {
+        return false;
+    }
+    if (value.len != 0) {
+        std::memcpy(output, value.data, value.len);
+    }
+    output[value.len] = '\0';
+    return true;
+}
+#endif
 
 bool valid_pin(int64_t pin) {
     return pin >= 0 && pin < SOC_GPIO_PIN_COUNT;
@@ -72,6 +105,19 @@ int32_t return_bytes(rustscript_value *result, const uint8_t *data, size_t len) 
     result->len = len;
     return 1;
 }
+
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+int32_t return_string(rustscript_value *result, const char *data) {
+    if (result == nullptr || data == nullptr) {
+        return -1;
+    }
+    *result = {};
+    result->tag = RUSTSCRIPT_VALUE_STRING;
+    result->data = reinterpret_cast<const uint8_t *>(data);
+    result->len = std::strlen(data);
+    return 1;
+}
+#endif
 
 int32_t gpio_configure(const rustscript_value *args, rustscript_value *result) {
     if (!is_int(args[0]) || !is_int(args[1]) || !valid_pin(args[0].integer)) {
@@ -306,6 +352,138 @@ int32_t mcu_deep_sleep(const rustscript_value *args, rustscript_value *) {
     return 0;
 }
 
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+esp_err_t initialize_wifi() {
+    if (wifi_initialized) {
+        return ESP_OK;
+    }
+    esp_err_t status = esp_netif_init();
+    if (status != ESP_OK && status != ESP_ERR_INVALID_STATE) {
+        return status;
+    }
+    status = esp_event_loop_create_default();
+    if (status != ESP_OK && status != ESP_ERR_INVALID_STATE) {
+        return status;
+    }
+    wifi_station = esp_netif_create_default_wifi_sta();
+    if (wifi_station == nullptr) {
+        return ESP_FAIL;
+    }
+    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
+    status = esp_wifi_init(&config);
+    if (status != ESP_OK) {
+        return status;
+    }
+    wifi_initialized = true;
+    return ESP_OK;
+}
+
+int32_t wifi_connect(const rustscript_value *args, rustscript_value *result) {
+    char ssid[33];
+    char password[65];
+    if (!copy_string(args[0], ssid, sizeof(ssid)) ||
+        !copy_string(args[1], password, sizeof(password)) || ssid[0] == '\0') {
+        return -1;
+    }
+    if (initialize_wifi() != ESP_OK) {
+        return return_bool(result, false);
+    }
+    wifi_config_t config{};
+    std::memcpy(config.sta.ssid, ssid, std::strlen(ssid));
+    std::memcpy(config.sta.password, password, std::strlen(password));
+    config.sta.threshold.authmode = password[0] == '\0' ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    config.sta.pmf_cfg.capable = true;
+    config.sta.pmf_cfg.required = false;
+    esp_err_t status = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (status == ESP_OK) {
+        status = esp_wifi_set_mode(WIFI_MODE_STA);
+    }
+    if (status == ESP_OK) {
+        status = esp_wifi_set_config(WIFI_IF_STA, &config);
+    }
+    if (status == ESP_OK) {
+        status = esp_wifi_start();
+    }
+    if (status == ESP_OK) {
+        status = esp_wifi_connect();
+    }
+    return return_bool(result, status == ESP_OK);
+}
+
+int32_t wifi_disconnect(const rustscript_value *, rustscript_value *result) {
+    return return_bool(result, wifi_initialized && esp_wifi_disconnect() == ESP_OK);
+}
+
+int32_t wifi_is_connected(const rustscript_value *, rustscript_value *result) {
+    wifi_ap_record_t access_point{};
+    return return_bool(
+        result,
+        wifi_initialized && esp_wifi_sta_get_ap_info(&access_point) == ESP_OK
+    );
+}
+
+int32_t wifi_rssi(const rustscript_value *, rustscript_value *result) {
+    wifi_ap_record_t access_point{};
+    if (!wifi_initialized || esp_wifi_sta_get_ap_info(&access_point) != ESP_OK) {
+        return return_int(result, -127);
+    }
+    return return_int(result, access_point.rssi);
+}
+
+int32_t wifi_local_ip(const rustscript_value *, rustscript_value *result) {
+    esp_netif_ip_info_t info{};
+    if (wifi_station == nullptr || esp_netif_get_ip_info(wifi_station, &info) != ESP_OK ||
+        info.ip.addr == 0) {
+        network_text[0] = '\0';
+        return return_string(result, network_text);
+    }
+    std::snprintf(
+        network_text,
+        sizeof(network_text),
+        IPSTR,
+        IP2STR(&info.ip)
+    );
+    return return_string(result, network_text);
+}
+#endif
+
+#ifdef RUSTSCRIPT_FEATURE_BLUETOOTH
+bool bluetooth_is_active() {
+    return esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED;
+}
+
+int32_t bluetooth_enable(const rustscript_value *, rustscript_value *result) {
+    esp_bt_controller_status_t controller_status = esp_bt_controller_get_status();
+    if (controller_status == ESP_BT_CONTROLLER_STATUS_IDLE) {
+        esp_bt_controller_config_t config = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+        if (esp_bt_controller_init(&config) != ESP_OK) {
+            return return_bool(result, false);
+        }
+        controller_status = ESP_BT_CONTROLLER_STATUS_INITED;
+    }
+    if (controller_status == ESP_BT_CONTROLLER_STATUS_INITED &&
+        esp_bt_controller_enable(ESP_BT_MODE_BLE) != ESP_OK) {
+        return return_bool(result, false);
+    }
+    return return_bool(result, bluetooth_is_active());
+}
+
+int32_t bluetooth_disable(const rustscript_value *, rustscript_value *result) {
+    bool ok = true;
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
+        ok = esp_bt_controller_disable() == ESP_OK;
+    }
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED) {
+        ok = esp_bt_controller_deinit() == ESP_OK && ok;
+    }
+    return return_bool(result, ok);
+}
+
+int32_t bluetooth_is_enabled(const rustscript_value *, rustscript_value *result) {
+    return return_bool(result, bluetooth_is_active());
+}
+#endif
+
 int32_t serial_write(const rustscript_value *args, rustscript_value *) {
     if (args[0].tag != RUSTSCRIPT_VALUE_STRING ||
         (args[0].len != 0 && args[0].data == nullptr)) {
@@ -355,6 +533,18 @@ constexpr host_export HOST_EXPORTS[] = {
     {"mcu::random", 0, mcu_random},
     {"mcu::restart", 0, mcu_restart},
     {"mcu::deep_sleep_us", 1, mcu_deep_sleep},
+#ifdef RUSTSCRIPT_FEATURE_WIFI
+    {"wifi::connect", 2, wifi_connect},
+    {"wifi::disconnect", 0, wifi_disconnect},
+    {"wifi::is_connected", 0, wifi_is_connected},
+    {"wifi::rssi", 0, wifi_rssi},
+    {"wifi::local_ip", 0, wifi_local_ip},
+#endif
+#ifdef RUSTSCRIPT_FEATURE_BLUETOOTH
+    {"bluetooth::enable", 0, bluetooth_enable},
+    {"bluetooth::disable", 0, bluetooth_disable},
+    {"bluetooth::is_enabled", 0, bluetooth_is_enabled},
+#endif
     {"serial::write_line", 1, serial_write},
     {"serial::available", 0, serial_available},
     {"serial::read_bytes", 1, serial_read},

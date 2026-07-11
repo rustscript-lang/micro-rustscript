@@ -1,4 +1,4 @@
-name: ESP32 firmware release
+name: Firmware release
 
 on:
   push:
@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      PLATFORMIO_CORE_DIR: /mnt/TEMP/platformio/core
+      PIP_CACHE_DIR: /mnt/TEMP/platformio/pip-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,40 +21,57 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: llvm-tools-preview
-          targets: riscv32imc-unknown-none-elf
+          targets: riscv32imc-unknown-none-elf,riscv32imafc-unknown-none-elf
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install build tools
-        run: python -m pip install platformio==6.1.19
-      - name: Build factory image
-        run: pio run
+        run: |
+          sudo mkdir -p /mnt/TEMP
+          sudo chown -R "$USER:$USER" /mnt/TEMP
+          python -m venv /mnt/TEMP/platformio/venv
+          /mnt/TEMP/platformio/venv/bin/pip install platformio==6.1.19
+          echo /mnt/TEMP/platformio/venv/bin >> "$GITHUB_PATH"
+      - name: Install ESP-IDF preview toolchain under /mnt/TEMP
+        run: |
+          sudo mkdir -p /mnt/TEMP
+          sudo chown -R "$USER:$USER" /mnt/TEMP
+          ci/install-esp-idf-s31.sh
+        working-directory: app
+      - name: Build all release targets
+        run: pio run -e esp32-c3-devkitm-1 -e arduino -e esp32s31
         working-directory: app
       - name: Prepare release assets
         run: |
           cp .pio/build/esp32-c3-devkitm-1/firmware.elf dist/micro-rustscript-esp32-c3.elf
+          cp .pio/build/arduino/program dist/micro-rustscript-arduino
+          cp /mnt/TEMP/micro-rustscript-esp32s31/build/micro_rustscript_esp32s31.elf dist/micro-rustscript-esp32-s31.elf
           cp .pio/generated/esp32-blinky.vmbc dist/esp32-blinky.vmbc
           cp .pio/generated/rustscript.partition.bin dist/rustscript.partition.bin
           cp scripts/flash_vmbc.py scripts/vmbc_image.py scripts/repl_vmbc.py partitions.csv dist/
           cd dist
-          sha256sum micro-rustscript-esp32-c3.factory.bin micro-rustscript-esp32-c3.elf esp32-blinky.vmbc rustscript.partition.bin flash_vmbc.py vmbc_image.py repl_vmbc.py partitions.csv > SHA256SUMS
+          sha256sum micro-rustscript-esp32-c3.factory.bin micro-rustscript-esp32-c3.elf micro-rustscript-arduino micro-rustscript-esp32-s31.factory.bin micro-rustscript-esp32-s31.elf esp32-blinky.vmbc rustscript.partition.bin flash_vmbc.py vmbc_image.py repl_vmbc.py partitions.csv > SHA256SUMS
         working-directory: app
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: micro-rustscript ESP32-C3 ${{ github.ref_name }}
+          name: micro-rustscript firmware ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            Directly flashable ESP32-C3-DevKitM-1 image with namespaced GPIO, I2C, MCU, and serial framework APIs. Startup checks SD, then the dedicated VMBC partition, then opens the serial VMBC REPL.
+            Release images for ESP32-C3-DevKitM-1, Arduino host, and ESP32-S31. Supported ESP targets include optional ESP-IDF Wi-Fi and Bluetooth LE controller APIs.
 
             Flash at offset `0x0`:
             ```bash
             python -m esptool --chip esp32c3 erase_flash
             python -m esptool --chip esp32c3 write_flash 0x0 micro-rustscript-esp32-c3.factory.bin
+            python -m esptool --chip esp32s31 write_flash 0x0 micro-rustscript-esp32-s31.factory.bin
             ```
           files: |
             app/dist/micro-rustscript-esp32-c3.factory.bin
             app/dist/micro-rustscript-esp32-c3.elf
+            app/dist/micro-rustscript-arduino
+            app/dist/micro-rustscript-esp32-s31.factory.bin
+            app/dist/micro-rustscript-esp32-s31.elf
             app/dist/esp32-blinky.vmbc
             app/dist/rustscript.partition.bin
             app/dist/flash_vmbc.py

@@ -14,6 +14,11 @@ SCRIPT_IMAGE = GENERATED_DIR / "rustscript.partition.bin"
 PARTITIONS = PROJECT_DIR / "partitions.csv"
 RUST_TARGET = "riscv32imc-unknown-none-elf"
 ARCHIVE = TARGET_DIR / RUST_TARGET / "release" / "librustscript_embedded.a"
+RUST_FEATURES = [
+    feature.strip()
+    for feature in env.GetProjectOption("custom_rust_features", "esp32c3").split(",")
+    if feature.strip()
+]
 
 sys.path.insert(0, str(PROJECT_DIR / "scripts"))
 from vmbc_image import find_partition, pack_vmbc
@@ -46,7 +51,7 @@ run(
         RUST_TARGET,
         "--no-default-features",
         "--features",
-        "esp32c3",
+        ",".join(RUST_FEATURES),
     ],
     PROJECT_DIR,
     build_environment,
@@ -96,5 +101,9 @@ print(
 )
 
 env.Append(CPPPATH=[str(PROJECT_DIR / "include")])
+if "wifi" in RUST_FEATURES:
+    env.Append(CPPDEFINES=["RUSTSCRIPT_FEATURE_WIFI"])
+if "bluetooth" in RUST_FEATURES:
+    env.Append(CPPDEFINES=["RUSTSCRIPT_FEATURE_BLUETOOTH"])
 env.Append(LIBS=[env.File(str(ARCHIVE))])
 env.Append(FLASH_EXTRA_IMAGES=[(hex(script_offset), env.File(str(SCRIPT_IMAGE)))])

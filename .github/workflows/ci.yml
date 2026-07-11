@@ -28,7 +28,7 @@ jobs:
         run: cargo test --all-targets
         working-directory: app
       - name: Test embedded host-function ABI
-        run: cargo test --features esp32c3
+        run: cargo test --features esp32c3,wifi,bluetooth
         working-directory: app
       - name: Test VMBC partition packer
         run: |
@@ -44,6 +44,9 @@ jobs:
   esp32:
     name: ESP32-C3 factory firmware
     runs-on: ubuntu-latest
+    env:
+      PLATFORMIO_CORE_DIR: /mnt/TEMP/platformio/core
+      PIP_CACHE_DIR: /mnt/TEMP/platformio/pip-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,12 +54,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: llvm-tools-preview
-          targets: riscv32imc-unknown-none-elf
+          targets: riscv32imc-unknown-none-elf,riscv32imafc-unknown-none-elf
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install PlatformIO
-        run: python -m pip install platformio==6.1.19
+        run: |
+          sudo mkdir -p /mnt/TEMP
+          sudo chown -R "$USER:$USER" /mnt/TEMP
+          python -m venv /mnt/TEMP/platformio/venv
+          /mnt/TEMP/platformio/venv/bin/pip install platformio==6.1.19
+          echo /mnt/TEMP/platformio/venv/bin >> "$GITHUB_PATH"
       - name: Build complete firmware
         run: pio run
         working-directory: app
@@ -67,6 +75,15 @@ jobs:
           grep 'micro-rustscript:gpio=low' /tmp/arduino.log
           grep 'rss:status=0' /tmp/arduino.log
         working-directory: app
+      - name: Install ESP-IDF preview toolchain under /mnt/TEMP
+        run: |
+          sudo mkdir -p /mnt/TEMP
+          sudo chown -R "$USER:$USER" /mnt/TEMP
+          ci/install-esp-idf-s31.sh
+        working-directory: app
+      - name: Build ESP32-S31 factory image
+        run: pio run -e esp32s31
+        working-directory: app
       - name: Verify firmware artifacts
         run: |
           test -s .pio/build/esp32-c3-devkitm-1/firmware.elf
@@ -74,25 +91,32 @@ jobs:
           test -s dist/micro-rustscript-esp32-c3.factory.bin
           test -s .pio/generated/rustscript.partition.bin
           test -s .pio/build/arduino/program
+          test -s dist/micro-rustscript-esp32-s31.factory.bin
+          test -s /mnt/TEMP/micro-rustscript-esp32s31/build/micro_rustscript_esp32s31.elf
+          cp /mnt/TEMP/micro-rustscript-esp32s31/build/micro_rustscript_esp32s31.elf \
+            dist/micro-rustscript-esp32-s31.elf
           nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_run_vmbc
           nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_dispatch_host
-          grep 'rustscript.*0x0b0000.*0x010000' partitions.csv
+          grep 'rustscript.*0x110000.*0x010000' partitions.csv
           stat --format='%n %s bytes' \
             .pio/build/esp32-c3-devkitm-1/firmware.elf \
             .pio/build/esp32-c3-devkitm-1/firmware.bin \
             dist/micro-rustscript-esp32-c3.factory.bin \
             .pio/generated/esp32-blinky.vmbc \
             .pio/generated/rustscript.partition.bin
-          test "$(stat --format=%s dist/micro-rustscript-esp32-c3.factory.bin)" -lt 1000000
+          test "$(stat --format=%s dist/micro-rustscript-esp32-c3.factory.bin)" -lt 1200000
         working-directory: app
       - uses: actions/upload-artifact@v4
         with:
-          name: micro-rustscript-esp32-c3
+          name: micro-rustscript-firmware
           path: |
             app/dist/micro-rustscript-esp32-c3.factory.bin
             app/.pio/build/esp32-c3-devkitm-1/firmware.elf
             app/.pio/generated/esp32-blinky.vmbc
             app/.pio/generated/rustscript.partition.bin
+            app/.pio/build/arduino/program
+            app/dist/micro-rustscript-esp32-s31.factory.bin
+            app/dist/micro-rustscript-esp32-s31.elf
             app/scripts/flash_vmbc.py
             app/scripts/vmbc_image.py
             app/scripts/repl_vmbc.py

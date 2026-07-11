@@ -19,7 +19,7 @@ python -m esptool --chip esp32c3 write_flash 0x0 micro-rustscript-esp32-c3.facto
 The boot order is fixed:
 
 1. `/rustscript/main.vmbc` on an SD card connected with CS on GPIO 7.
-2. The dedicated 64 KiB `rustscript` flash partition at `0x0b0000`.
+2. The dedicated 64 KiB `rustscript` flash partition at `0x110000`.
 3. The serial VMBC REPL at 115200 baud.
 
 An absent, unreadable, or missing SD script automatically falls through to the flash partition.
@@ -36,6 +36,8 @@ use framework::gpio as gpio;
 use framework::i2c as i2c;
 use framework::mcu as mcu;
 use framework::serial as serial;
+use framework::wifi as wifi;
+use framework::bluetooth as bluetooth;
 
 let ok: bool = gpio::configure(8, 1);
 let written: bool = gpio::digital_write(8, true);
@@ -49,6 +51,10 @@ i2c::close();
 mcu::delay_ms(100);
 let free_heap: int = mcu::free_heap();
 serial::write_line("ready");
+
+let started: bool = wifi::connect("ssid", "password");
+let address: string = wifi::local_ip();
+let ble_ready: bool = bluetooth::enable();
 ```
 
 ### GPIO
@@ -77,6 +83,18 @@ serial::write_line("ready");
 `mcu` exports `delay_ms`, `delay_us`, `millis`, `micros`, `cpu_frequency_mhz`, `free_heap`,
 `flash_size`, `random`, `restart`, and `deep_sleep_us`. `serial` exports `write_line`, `available`,
 and `read_bytes`.
+
+### Wi-Fi and Bluetooth LE
+
+The `wifi` API exports `connect`, `disconnect`, `is_connected`, `rssi`, and `local_ip`. `connect`
+returns whether ESP-IDF accepted the asynchronous connection request; poll `is_connected` before
+using `rssi` or `local_ip`. The `bluetooth` API exports BLE-controller lifecycle operations:
+`enable`, `disable`, and `is_enabled`. Both use ESP-IDF APIs and are registered only on supported
+ESP targets.
+
+`wifi` and `bluetooth` are independent Cargo/PlatformIO features. ESP release targets enable both
+by default through `custom_rust_features`; removing either feature also removes its ESP-IDF includes
+and RSS host exports. The host `arduino` target exports neither API.
 
 The private host ABI lives in `firmware/host_framework.cpp`; the public RSS modules live under
 `programs/framework/`. This keeps script-facing APIs namespaced while allowing the VM to dispatch a
@@ -132,6 +150,8 @@ export PATH=/mnt/TEMP/platformio/bin:$PATH
 
 pio run -e esp32-c3-devkitm-1
 pio run -e arduino
+ci/install-esp-idf-s31.sh
+pio run -e esp32s31
 .pio/build/arduino/program
 ```
 
@@ -144,11 +164,16 @@ Outputs:
 .pio/generated/esp32-blinky.vmbc
 .pio/generated/rustscript.partition.bin
 dist/micro-rustscript-esp32-c3.factory.bin
+dist/micro-rustscript-esp32-s31.factory.bin
 ```
 
 The factory image merges the ESP32 boot components, application, and default script partition. The
 release includes the factory image, ELF, VMBC, packed script partition, flash helpers, partition CSV,
 and SHA-256 checksums.
+
+The `esp32s31` target uses pinned ESP-IDF master preview support. ESP-IDF source, Python environment,
+toolchains, caches, Rust target artifacts, generated files, and build output are all kept under
+`/mnt/TEMP`; only source and build configuration live in the repository.
 
 The `arduino` environment links `pd-vm-nostd` through an Arduino-compatible GPIO, delay, serial,
 and allocator bridge. It runs the bridge and compiled VMBC program on the host before a board is
@@ -156,7 +181,8 @@ connected. A successful simulation ends with `rss:status=0`.
 
 ## ESP32 image size
 
-The ESP32 partition table uses a 640 KiB factory application slot and a 64 KiB VMBC slot. OTA data
+The ESP32 partition table uses a 1 MiB factory application slot and a 64 KiB VMBC slot. OTA data
 and SPIFFS partitions are omitted because this image is flashed directly and script updates use the
-dedicated VMBC partition. The measured factory image is 722,391 bytes, down from 2,164,183 bytes
-(66.62%), while retaining SD boot, the flash script, and the serial VMBC REPL.
+dedicated VMBC partition. With `wifi` and `bluetooth` enabled, the measured factory image is
+1,115,607 bytes, down from 2,164,183 bytes (48.45%), while retaining SD boot, the flash script,
+and the serial VMBC REPL.
