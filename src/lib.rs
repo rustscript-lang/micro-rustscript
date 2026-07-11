@@ -2,14 +2,14 @@
 
 extern crate alloc;
 
-#[cfg(all(feature = "esp32", target_os = "none"))]
+#[cfg(all(any(feature = "arduino", feature = "esp32"), not(feature = "host")))]
 mod allocator;
-#[cfg(feature = "esp32")]
+#[cfg(any(feature = "arduino", feature = "esp32"))]
 mod ffi;
 #[cfg(feature = "host")]
 mod host;
 
-#[cfg(feature = "esp32")]
+#[cfg(any(feature = "arduino", feature = "esp32"))]
 pub use ffi::{
     RustScriptHostCallback, RustScriptValue, RustScriptValueError, RustScriptValueTag,
     rustscript_run_vmbc,

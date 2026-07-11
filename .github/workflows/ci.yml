@@ -60,21 +60,30 @@ jobs:
       - name: Build complete firmware
         run: pio run
         working-directory: app
+      - name: Build and run Arduino target
+        run: |
+          pio run -e arduino
+          .pio/build/arduino/program | tee /tmp/arduino.log
+          grep 'micro-rustscript:gpio=low' /tmp/arduino.log
+          grep 'rss:status=0' /tmp/arduino.log
+        working-directory: app
       - name: Verify firmware artifacts
         run: |
           test -s .pio/build/esp32-c3-devkitm-1/firmware.elf
           test -s .pio/build/esp32-c3-devkitm-1/firmware.bin
           test -s dist/micro-rustscript-esp32-c3.factory.bin
           test -s .pio/generated/rustscript.partition.bin
+          test -s .pio/build/arduino/program
           nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_run_vmbc
           nm -C .pio/build/esp32-c3-devkitm-1/firmware.elf | grep rustscript_dispatch_host
-          grep 'rustscript.*0x210000.*0x100000' partitions.csv
+          grep 'rustscript.*0x0b0000.*0x010000' partitions.csv
           stat --format='%n %s bytes' \
             .pio/build/esp32-c3-devkitm-1/firmware.elf \
             .pio/build/esp32-c3-devkitm-1/firmware.bin \
             dist/micro-rustscript-esp32-c3.factory.bin \
             .pio/generated/esp32-blinky.vmbc \
             .pio/generated/rustscript.partition.bin
+          test "$(stat --format=%s dist/micro-rustscript-esp32-c3.factory.bin)" -lt 1000000
         working-directory: app
       - uses: actions/upload-artifact@v4
         with:

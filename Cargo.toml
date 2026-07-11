@@ -19,6 +19,7 @@ required-features = ["host"]
 default = ["host"]
 host = ["dep:vm", "vm/runtime"]
 esp32 = ["dep:pd_vm_nostd"]
+arduino = ["dep:pd_vm_nostd"]
 
 [dependencies]
 pd_vm_nostd = { package = "pd-vm-nostd", git = "https://github.com/rustscript-lang/rustscript.git", rev = "ab04637a9b6192dd4f37b7e6abe4dde83f2fc710", version = "0.1.0", optional = true }

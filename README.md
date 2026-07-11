@@ -19,7 +19,7 @@ python -m esptool --chip esp32c3 write_flash 0x0 micro-rustscript-esp32-c3.facto
 The boot order is fixed:
 
 1. `/rustscript/main.vmbc` on an SD card connected with CS on GPIO 7.
-2. The dedicated `rustscript` flash partition at `0x210000`.
+2. The dedicated 64 KiB `rustscript` flash partition at `0x0b0000`.
 3. The serial VMBC REPL at 115200 baud.
 
 An absent, unreadable, or missing SD script automatically falls through to the flash partition.
@@ -123,8 +123,16 @@ interpreter, without the desktop compiler.
 The repository root is a complete PlatformIO project:
 
 ```bash
-uv tool install platformio
-pio run
+export UV_TOOL_DIR=/mnt/TEMP/platformio/tools
+export UV_TOOL_BIN_DIR=/mnt/TEMP/platformio/bin
+export UV_CACHE_DIR=/mnt/TEMP/platformio/uv-cache
+export PLATFORMIO_CORE_DIR=/mnt/TEMP/platformio/core
+uv tool install platformio==6.1.19
+export PATH=/mnt/TEMP/platformio/bin:$PATH
+
+pio run -e esp32-c3-devkitm-1
+pio run -e arduino
+.pio/build/arduino/program
 ```
 
 Outputs:
@@ -132,6 +140,7 @@ Outputs:
 ```text
 .pio/build/esp32-c3-devkitm-1/firmware.elf
 .pio/build/esp32-c3-devkitm-1/firmware.bin
+.pio/build/arduino/program
 .pio/generated/esp32-blinky.vmbc
 .pio/generated/rustscript.partition.bin
 dist/micro-rustscript-esp32-c3.factory.bin
@@ -140,3 +149,14 @@ dist/micro-rustscript-esp32-c3.factory.bin
 The factory image merges the ESP32 boot components, application, and default script partition. The
 release includes the factory image, ELF, VMBC, packed script partition, flash helpers, partition CSV,
 and SHA-256 checksums.
+
+The `arduino` environment links `pd-vm-nostd` through an Arduino-compatible GPIO, delay, serial,
+and allocator bridge. It runs the bridge and compiled VMBC program on the host before a board is
+connected. A successful simulation ends with `rss:status=0`.
+
+## ESP32 image size
+
+The ESP32 partition table uses a 640 KiB factory application slot and a 64 KiB VMBC slot. OTA data
+and SPIFFS partitions are omitted because this image is flashed directly and script updates use the
+dedicated VMBC partition. The measured factory image is 722,391 bytes, down from 2,164,183 bytes
+(66.62%), while retaining SD boot, the flash script, and the serial VMBC REPL.
