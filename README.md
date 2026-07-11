@@ -2,11 +2,13 @@
 
 [![rustscript-embedded on crates.io](https://img.shields.io/crates/v/rustscript-embedded.svg)](https://crates.io/crates/rustscript-embedded)
 
-A directly flashable RustScript runtime for ESP32-C3. One image contains the bootloader,
-partition table, Arduino-ESP32 runtime, `pd-vm-nostd`, framework host API, and a default VMBC
-script partition.
+A portable RustScript VMBC runtime with release targets for ESP32-C3, ESP32-S31 preview hardware,
+and a native Arduino API simulator. Each ESP factory image contains its bootloader, partition table,
+platform runtime, `pd-vm-nostd`, framework host bridge, and a default VMBC program.
 
-## Flash the complete image
+## Flash complete images
+
+### ESP32-C3
 
 Download `micro-rustscript-esp32-c3.factory.bin` from the latest GitHub Release and flash it at
 offset zero:
@@ -16,7 +18,7 @@ python -m esptool --chip esp32c3 erase_flash
 python -m esptool --chip esp32c3 write_flash 0x0 micro-rustscript-esp32-c3.factory.bin
 ```
 
-The boot order is fixed:
+The ESP32-C3 boot order is fixed:
 
 1. `/rustscript/main.vmbc` on an SD card connected with CS on GPIO 7.
 2. The dedicated 64 KiB `rustscript` flash partition at `0x110000`.
@@ -26,18 +28,49 @@ An absent, unreadable, or missing SD script automatically falls through to the f
 The release factory image already contains `esp32-blinky.vmbc` in that partition.
 `RUSTSCRIPT_SD_CS` and `RUSTSCRIPT_SD_PATH` can be overridden with PlatformIO build flags.
 
+### ESP32-S31 preview
+
+Download `micro-rustscript-esp32-s31.factory.bin` and flash the merged image at offset zero:
+
+```bash
+python -m esptool --chip esp32s31 write_flash 0x0 micro-rustscript-esp32-s31.factory.bin
+```
+
+The S31 preview image currently embeds the default VMBC program into the application at build time.
+Its runtime does not yet implement the C3 SD-card lookup, replaceable flash VMBC partition, or serial
+VMBC REPL. The release also includes the S31 ELF for debugging.
+
+## Targets and source layout
+
+| PlatformIO environment | Purpose | Platform integration | Main source |
+|---|---|---|---|
+| `esp32-c3-devkitm-1` | Flashable ESP32-C3 firmware | Official PlatformIO board plus Arduino-ESP32 and selected ESP-IDF APIs | shared `firmware/` sources |
+| `esp32s31` | Flashable ESP32-S31 preview firmware | Pinned ESP-IDF master preview toolchain | `esp32s31/` CMake project |
+| `arduino` | Native host simulation of a small Arduino API subset | PlatformIO `native` plus `firmware/simulator/` | `firmware/arduino/main.cpp` |
+
+Only ESP32-S31 has a top-level target directory because current PlatformIO releases do not provide
+an ESP32-S31 board definition or framework package. Its directory supplies the ESP-IDF project
+files that PlatformIO cannot generate: `CMakeLists.txt`, `sdkconfig.defaults`, partition layout, and
+the pure ESP-IDF application entry point. ESP32-C3 can use PlatformIO's standard
+`esp32-c3-devkitm-1` board and therefore shares the normal `firmware/` project. The `arduino` target
+is a native simulator rather than separate hardware; its target-specific source already lives under
+`firmware/arduino/` and reuses the simulator compatibility layer.
+
+All three are still first-class PlatformIO and release targets. The directory shape reflects their
+different build systems, not a difference in release status.
+
 ## Framework API from RSS
 
-Hardware functions are exposed through RSS modules, keeping board ABI names private. Import only the
-capabilities a script uses:
+Hardware functions are exposed through built-in RSS modules, keeping the C host ABI private. Import
+only the capabilities a script uses:
 
 ```rust
-use framework::gpio as gpio;
-use framework::i2c as i2c;
-use framework::mcu as mcu;
-use framework::serial as serial;
-use framework::wifi as wifi;
-use framework::bluetooth as bluetooth;
+use gpio;
+use i2c;
+use mcu;
+use serial;
+use wifi;
+use bluetooth;
 
 let ok: bool = gpio::configure(8, 1);
 let written: bool = gpio::digital_write(8, true);
@@ -57,48 +90,14 @@ let address: string = wifi::local_ip();
 let ble_ready: bool = bluetooth::enable();
 ```
 
-### GPIO
+API coverage is target-dependent. ESP32-C3 provides GPIO, ADC, PWM, I2C, MCU, serial, Wi-Fi, and BLE
+controller functions. ESP32-S31 currently provides digital GPIO, core MCU timing/status, serial
+output, Wi-Fi, and BLE controller functions. The Arduino host target provides a small GPIO,
+`delay_ms`, and serial-output simulation subset.
 
-| Function | Result |
-|---|---|
-| `gpio::configure(pin, mode)` | `bool`; modes: input `0`, output `1`, pull-up `2`, pull-down `3`, open-drain `4` |
-| `gpio::digital_write(pin, high)` | `bool` |
-| `gpio::digital_read(pin)` | `bool` |
-| `gpio::analog_read(pin)` | ADC value as `int` |
-| `gpio::pwm_write(pin, duty, frequency, resolution_bits)` | `bool`; six channels, 1–16 bits |
-
-### I2C
-
-| Function | Result |
-|---|---|
-| `i2c::open(sda, scl, frequency)` | `bool` |
-| `i2c::close()` | `null` |
-| `i2c::transmit(address, data)` | Wire status as `int` |
-| `i2c::transmit_register(address, register, data)` | Wire status as `int` |
-| `i2c::receive(address, length)` | Up to 255 bytes |
-| `i2c::receive_register(address, register, length)` | Up to 255 bytes |
-
-### MCU and serial
-
-`mcu` exports `delay_ms`, `delay_us`, `millis`, `micros`, `cpu_frequency_mhz`, `free_heap`,
-`flash_size`, `random`, `restart`, and `deep_sleep_us`. `serial` exports `write_line`, `available`,
-and `read_bytes`.
-
-### Wi-Fi and Bluetooth LE
-
-The `wifi` API exports `connect`, `disconnect`, `is_connected`, `rssi`, and `local_ip`. `connect`
-returns whether ESP-IDF accepted the asynchronous connection request; poll `is_connected` before
-using `rssi` or `local_ip`. The `bluetooth` API exports BLE-controller lifecycle operations:
-`enable`, `disable`, and `is_enabled`. Both use ESP-IDF APIs and are registered only on supported
-ESP targets.
-
-`wifi` and `bluetooth` are independent Cargo/PlatformIO features. ESP release targets enable both
-by default through `custom_rust_features`; removing either feature also removes its ESP-IDF includes
-and RSS host exports. The host `arduino` target exports neither API.
-
-The private host ABI lives in `firmware/host_framework.cpp`; the public RSS modules live under
-`programs/framework/`. This keeps script-facing APIs namespaced while allowing the VM to dispatch a
-compact static function table.
+See **[Framework API reference](docs/framework-api.md)** for the complete support matrix, RSS
+signatures, argument limits, return behavior, asynchronous Wi-Fi semantics, BLE scope, and C host
+callback contract.
 
 ## Replace only the VMBC partition
 
@@ -161,15 +160,17 @@ Outputs:
 .pio/build/esp32-c3-devkitm-1/firmware.elf
 .pio/build/esp32-c3-devkitm-1/firmware.bin
 .pio/build/arduino/program
+.pio/build/esp32s31/program
 .pio/generated/esp32-blinky.vmbc
 .pio/generated/rustscript.partition.bin
 dist/micro-rustscript-esp32-c3.factory.bin
 dist/micro-rustscript-esp32-s31.factory.bin
+/mnt/TEMP/micro-rustscript-esp32s31/build/micro_rustscript_esp32s31.elf
 ```
 
-The factory image merges the ESP32 boot components, application, and default script partition. The
-release includes the factory image, ELF, VMBC, packed script partition, flash helpers, partition CSV,
-and SHA-256 checksums.
+Each ESP factory image merges its bootloader, partition table, and application. The C3 factory image
+also includes the packed default script partition. The release includes both factory images, both
+ELFs, the Arduino host executable, VMBC assets and helpers for C3, and SHA-256 checksums.
 
 The `esp32s31` target uses pinned ESP-IDF master preview support. ESP-IDF source, Python environment,
 toolchains, caches, Rust target artifacts, generated files, and build output are all kept under
@@ -179,9 +180,9 @@ The `arduino` environment links `pd-vm-nostd` through an Arduino-compatible GPIO
 and allocator bridge. It runs the bridge and compiled VMBC program on the host before a board is
 connected. A successful simulation ends with `rss:status=0`.
 
-## ESP32 image size
+## ESP32-C3 image size
 
-The ESP32 partition table uses a 1 MiB factory application slot and a 64 KiB VMBC slot. OTA data
+The ESP32-C3 partition table uses a 1 MiB factory application slot and a 64 KiB VMBC slot. OTA data
 and SPIFFS partitions are omitted because this image is flashed directly and script updates use the
 dedicated VMBC partition. With `wifi` and `bluetooth` enabled, the measured factory image is
 1,115,607 bytes, down from 2,164,183 bytes (48.45%), while retaining SD boot, the flash script,
