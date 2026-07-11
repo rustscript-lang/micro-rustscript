@@ -1,9 +1,10 @@
-name: Firmware release
+name: Release
 
 on:
   push:
     tags:
-      - 'esp32-v*'
+      - '[0-9]*.[0-9]*.[0-9]*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 permissions:
   contents: write
@@ -38,6 +39,10 @@ jobs:
           sudo chown -R "$USER:$USER" /mnt/TEMP
           ci/install-esp-idf-s31.sh
         working-directory: app
+      - name: Verify default ESP release features
+        run: |
+          python -c "from pathlib import Path; text = Path('platformio.ini').read_text(); assert 'custom_rust_features = esp32c3,wifi,bluetooth' in text; assert 'custom_rust_features = esp32s31,wifi,bluetooth' in text"
+        working-directory: app
       - name: Build all release targets
         run: pio run -e esp32-c3-devkitm-1 -e arduino -e esp32s31
         working-directory: app
@@ -58,7 +63,7 @@ jobs:
           name: micro-rustscript firmware ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            Release images for ESP32-C3-DevKitM-1, Arduino host, and ESP32-S31. Supported ESP targets include optional ESP-IDF Wi-Fi and Bluetooth LE controller APIs.
+            Release images for ESP32-C3-DevKitM-1, Arduino host, and ESP32-S31. Both ESP factory images enable the ESP-IDF Wi-Fi and Bluetooth LE controller APIs by default.
 
             Flash at offset `0x0`:
             ```bash
