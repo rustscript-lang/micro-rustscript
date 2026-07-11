@@ -18,7 +18,7 @@ required-features = ["host"]
 [features]
 default = ["host"]
 host = ["dep:vm", "vm/runtime"]
-esp32 = ["dep:pd_vm_nostd"]
+esp32c3 = ["dep:pd_vm_nostd"]
 arduino = ["dep:pd_vm_nostd"]
 
 [dependencies]

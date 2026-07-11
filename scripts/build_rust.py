@@ -46,7 +46,7 @@ run(
         RUST_TARGET,
         "--no-default-features",
         "--features",
-        "esp32",
+        "esp32c3",
     ],
     PROJECT_DIR,
     build_environment,

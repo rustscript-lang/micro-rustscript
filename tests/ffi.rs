@@ -1,4 +1,4 @@
-#![cfg(feature = "esp32")]
+#![cfg(feature = "esp32c3")]
 
 use std::ffi::c_void;
 use std::slice;

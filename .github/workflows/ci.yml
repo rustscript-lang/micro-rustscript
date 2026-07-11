@@ -28,7 +28,7 @@ jobs:
         run: cargo test --all-targets
         working-directory: app
       - name: Test embedded host-function ABI
-        run: cargo test --features esp32
+        run: cargo test --features esp32c3
         working-directory: app
       - name: Test VMBC partition packer
         run: |
