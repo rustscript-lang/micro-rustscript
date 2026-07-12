@@ -24,8 +24,9 @@ void rustscript_repl();
 
 #define REPL_REQUEST_MAGIC "RSSQ"
 #define REPL_RESPONSE_MAGIC "RSSP"
-#define REPL_FRAME_HEADER_SIZE 12
-#define REPL_MAX_FRAME_SIZE (16U * 1024U * 1024U)
+#define REPL_FRAME_VERSION 1
+#define REPL_FRAME_HEADER_SIZE 24
+#define REPL_MAX_FRAME_SIZE (128U * 1024U)
 
-// Request:  "RSSQ" + program_len(u32 LE) + state_len(u32 LE) + program + state.
-// Response: "RSSP" + status(i32 LE) + response_len(u32 LE) + response.
+// Request:  magic + version/flags + request_id + program_len + state_len + crc32.
+// Response: magic + version/flags + request_id + status + response_len + crc32.

@@ -129,7 +129,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "pd-host-function"
 version = "0.1.0"
-source = "git+https://github.com/rustscript-lang/rustscript.git?rev=5380c19#5380c19bc1eb1cea180254ef4559934044c93598"
+source = "git+https://github.com/rustscript-lang/rustscript.git?rev=0b18a33#0b18a334fedd295cb71daf6a38b338ad6440ba79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -139,7 +139,7 @@ dependencies = [
 [[package]]
 name = "pd-vm"
 version = "0.1.0"
-source = "git+https://github.com/rustscript-lang/rustscript.git?rev=5380c19#5380c19bc1eb1cea180254ef4559934044c93598"
+source = "git+https://github.com/rustscript-lang/rustscript.git?rev=0b18a33#0b18a334fedd295cb71daf6a38b338ad6440ba79"
 dependencies = [
  "base64",
  "futures-channel",
@@ -157,7 +157,7 @@ dependencies = [
 [[package]]
 name = "pd-vm-nostd"
 version = "0.1.0"
-source = "git+https://github.com/rustscript-lang/rustscript.git?rev=5380c19#5380c19bc1eb1cea180254ef4559934044c93598"
+source = "git+https://github.com/rustscript-lang/rustscript.git?rev=0b18a33#0b18a334fedd295cb71daf6a38b338ad6440ba79"
 
 [[package]]
 name = "proc-macro2"

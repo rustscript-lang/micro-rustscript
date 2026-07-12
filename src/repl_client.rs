@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -9,8 +10,9 @@ use crate::{ReplResponse, ReplValue, ReplWireError, decode_repl_response, encode
 
 pub const REPL_REQUEST_MAGIC: [u8; 4] = *b"RSSQ";
 pub const REPL_RESPONSE_MAGIC: [u8; 4] = *b"RSSP";
-const FRAME_HEADER_LEN: usize = 12;
-const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+const FRAME_VERSION: u16 = 1;
+const FRAME_HEADER_LEN: usize = 24;
+const MAX_FRAME_BYTES: usize = 128 * 1024;
 
 pub trait ReplTransport {
     fn execute(&mut self, program: &[u8], state: &[u8]) -> io::Result<(i32, Vec<u8>)>;
@@ -19,6 +21,7 @@ pub trait ReplTransport {
 pub struct SerialReplTransport<T> {
     io: T,
     device_output: Vec<u8>,
+    next_request_id: u32,
 }
 
 impl<T> SerialReplTransport<T> {
@@ -26,6 +29,7 @@ impl<T> SerialReplTransport<T> {
         Self {
             io,
             device_output: Vec::new(),
+            next_request_id: 1,
         }
     }
 
@@ -51,44 +55,99 @@ impl<T: Read + Write> ReplTransport for SerialReplTransport<T> {
             ));
         }
 
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
         let mut header = [0u8; FRAME_HEADER_LEN];
         header[..4].copy_from_slice(&REPL_REQUEST_MAGIC);
-        header[4..8].copy_from_slice(&program_len.to_le_bytes());
-        header[8..12].copy_from_slice(&state_len.to_le_bytes());
+        header[4..6].copy_from_slice(&FRAME_VERSION.to_le_bytes());
+        header[8..12].copy_from_slice(&request_id.to_le_bytes());
+        header[12..16].copy_from_slice(&program_len.to_le_bytes());
+        header[16..20].copy_from_slice(&state_len.to_le_bytes());
+        header[20..24].copy_from_slice(&request_crc(program, state).to_le_bytes());
         self.io.write_all(&header)?;
         self.io.write_all(program)?;
         self.io.write_all(state)?;
         self.io.flush()?;
 
         self.device_output.clear();
-        let mut window = [0u8; 4];
-        self.io.read_exact(&mut window)?;
-        while window != REPL_RESPONSE_MAGIC {
-            if self.device_output.len() >= 64 * 1024 {
+        let mut pending = VecDeque::new();
+        loop {
+            let mut candidate = [0u8; FRAME_HEADER_LEN];
+            for byte in &mut candidate[..4] {
+                *byte = read_stream_byte(&mut self.io, &mut pending)?;
+            }
+            while candidate[..4] != REPL_RESPONSE_MAGIC {
+                if self.device_output.len() >= 64 * 1024 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "REPL response prelude exceeds size limit",
+                    ));
+                }
+                self.device_output.push(candidate[0]);
+                candidate[..4].rotate_left(1);
+                candidate[3] = read_stream_byte(&mut self.io, &mut pending)?;
+            }
+            for byte in &mut candidate[4..] {
+                *byte = read_stream_byte(&mut self.io, &mut pending)?;
+            }
+            let version = u16::from_le_bytes(candidate[4..6].try_into().expect("fixed slice"));
+            let candidate_id =
+                u32::from_le_bytes(candidate[8..12].try_into().expect("fixed slice"));
+            if version != FRAME_VERSION || candidate_id != request_id {
+                self.device_output.push(candidate[0]);
+                for byte in candidate[1..].iter().rev() {
+                    pending.push_front(*byte);
+                }
+                continue;
+            }
+
+            let status = i32::from_le_bytes(candidate[12..16].try_into().expect("fixed slice"));
+            let response_len =
+                u32::from_le_bytes(candidate[16..20].try_into().expect("fixed slice")) as usize;
+            let expected_crc =
+                u32::from_le_bytes(candidate[20..24].try_into().expect("fixed slice"));
+            if response_len > MAX_FRAME_BYTES {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "REPL response prelude exceeds size limit",
+                    "REPL response exceeds size limit",
                 ));
             }
-            self.device_output.push(window[0]);
-            window.rotate_left(1);
-            self.io.read_exact(&mut window[3..4])?;
+            let mut response = vec![0; response_len];
+            self.io.read_exact(&mut response)?;
+            if crc32(&response) != expected_crc {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "REPL response CRC mismatch",
+                ));
+            }
+            return Ok((status, response));
         }
-        header[..4].copy_from_slice(&window);
-        self.io.read_exact(&mut header[4..])?;
-        let status = i32::from_le_bytes(header[4..8].try_into().expect("fixed slice"));
-        let response_len =
-            u32::from_le_bytes(header[8..12].try_into().expect("fixed slice")) as usize;
-        if response_len > MAX_FRAME_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "REPL response exceeds size limit",
-            ));
-        }
-        let mut response = vec![0; response_len];
-        self.io.read_exact(&mut response)?;
-        Ok((status, response))
     }
+}
+
+fn read_stream_byte<T: Read>(io: &mut T, pending: &mut VecDeque<u8>) -> io::Result<u8> {
+    if let Some(byte) = pending.pop_front() {
+        return Ok(byte);
+    }
+    let mut byte = [0u8; 1];
+    io.read_exact(&mut byte)?;
+    Ok(byte[0])
+}
+
+fn request_crc(program: &[u8], state: &[u8]) -> u32 {
+    crc32(program) ^ crc32(state).rotate_left(1)
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -192,7 +251,7 @@ impl SerialReplSession {
             .map_err(|error| ReplClientError::Encode(error.to_string()))?;
         let encoded_state = encode_repl_state(&seed)?;
         let (status, payload) = transport.execute(&encoded_program, &encoded_state)?;
-        if status != 0 {
+        if status != 0 && payload.is_empty() {
             return Err(ReplClientError::Device(status));
         }
         let response = decode_repl_response(&payload)?;
@@ -202,7 +261,16 @@ impl SerialReplSession {
                 actual: response.locals.len(),
             });
         }
-        self.sync(&program, &compiled.bindings, &moved_by_rebinding, &response)?;
+        let no_moves = BTreeSet::new();
+        let moves = if status == 0 {
+            &moved_by_rebinding
+        } else {
+            &no_moves
+        };
+        self.sync(&program, &compiled.bindings, moves, &response)?;
+        if status != 0 {
+            return Err(ReplClientError::Device(status));
+        }
         Ok(response.result)
     }
 
@@ -288,27 +356,47 @@ fn locals_moved_by_rebinding(
         .filter_map(|name| debug.local_index(name).map(|slot| (slot, name.clone())))
         .collect::<BTreeMap<_, _>>();
     let mut moved = BTreeSet::new();
+    let mut move_store_offsets = BTreeSet::new();
     let mut ip = 0;
     while ip < program.code.len() {
         let Ok(opcode) = OpCode::try_from(program.code[ip]) else {
             break;
         };
         if opcode == OpCode::Ldloc
-            && let (Some(source), Some(OpCode::Stloc), Some(target)) = (
-                program.code.get(ip + 1).copied(),
-                program
-                    .code
-                    .get(ip + 2)
-                    .copied()
-                    .and_then(|byte| OpCode::try_from(byte).ok()),
-                program.code.get(ip + 3).copied(),
-            )
-            && source != target
+            && let Some(source) = program.code.get(ip + 1).copied()
             && let Some(name) = by_slot.get(&source)
         {
-            moved.insert(name.clone());
+            let direct_target = program
+                .code
+                .get(ip + 2)
+                .copied()
+                .and_then(|byte| OpCode::try_from(byte).ok())
+                .filter(|opcode| *opcode == OpCode::Stloc)
+                .and_then(|_| program.code.get(ip + 3).copied());
+            if direct_target.is_some_and(|target| target != source) {
+                moved.insert(name.clone());
+            }
+
+            let null_store = program
+                .code
+                .get(ip + 2)
+                .copied()
+                .and_then(|byte| OpCode::try_from(byte).ok())
+                .filter(|opcode| *opcode == OpCode::Ldc)
+                .and_then(|_| program.code.get(ip + 3..ip + 7))
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)
+                .and_then(|index| program.constants.get(index as usize))
+                .is_some_and(|value| value == &vm::Value::Null)
+                && program.code.get(ip + 7).copied() == Some(OpCode::Stloc as u8)
+                && program.code.get(ip + 8).copied() == Some(source);
+            if null_store {
+                moved.insert(name.clone());
+                move_store_offsets.insert(ip + 7);
+            }
         }
         if opcode == OpCode::Stloc
+            && !move_store_offsets.contains(&ip)
             && let Some(target) = program.code.get(ip + 1).copied()
             && let Some(name) = by_slot.get(&target)
         {
@@ -613,6 +701,34 @@ mod tests {
     }
 
     #[test]
+    fn runtime_error_response_updates_session_locals() {
+        struct MutatingErrorTransport;
+
+        impl ReplTransport for MutatingErrorTransport {
+            fn execute(&mut self, _program: &[u8], state: &[u8]) -> io::Result<(i32, Vec<u8>)> {
+                let mut locals = decode_repl_state(state).unwrap();
+                locals[0] = ReplValue::Int(2);
+                let payload = encode_repl_response(&ReplResponse {
+                    locals,
+                    result: None,
+                })
+                .unwrap();
+                Ok((-5, payload))
+            }
+        }
+
+        let mut session = SerialReplSession::new();
+        session
+            .eval("let mut x = 1;", &mut VmTransport::default())
+            .unwrap();
+        assert!(session.eval("x = 2;", &mut MutatingErrorTransport).is_err());
+        assert_eq!(
+            session.locals.get("x").map(|local| &local.value),
+            Some(&ReplValue::Int(2))
+        );
+    }
+
+    #[test]
     fn moved_string_is_rejected_before_device_write() {
         let mut session = SerialReplSession::new();
         let mut transport = VmTransport::default();
@@ -641,22 +757,58 @@ mod tests {
             result: Some(ReplValue::Int(42)),
         })
         .unwrap();
-        let mut reply = b"device log\n".to_vec();
+        let mut fake_marker = Vec::from(REPL_RESPONSE_MAGIC);
+        fake_marker.extend_from_slice(&[0; FRAME_HEADER_LEN - 4]);
+        let mut reply = fake_marker.clone();
+        reply.extend_from_slice(b"device log\n");
         reply.extend_from_slice(&REPL_RESPONSE_MAGIC);
+        reply.extend_from_slice(&FRAME_VERSION.to_le_bytes());
+        reply.extend_from_slice(&0u16.to_le_bytes());
+        reply.extend_from_slice(&1u32.to_le_bytes());
         reply.extend_from_slice(&0i32.to_le_bytes());
         reply.extend_from_slice(&(response.len() as u32).to_le_bytes());
+        reply.extend_from_slice(&crc32(&response).to_le_bytes());
         reply.extend_from_slice(&response);
         let io = CursorIo::new(reply);
         let mut transport = SerialReplTransport::new(io);
         let (status, payload) = transport.execute(&[0, b'\n', 255], &[1, 2]).unwrap();
         assert_eq!(status, 0);
         assert_eq!(payload, response);
-        assert_eq!(transport.take_device_output(), b"device log\n");
+        fake_marker.extend_from_slice(b"device log\n");
+        assert_eq!(transport.take_device_output(), fake_marker);
         let io = transport.into_inner();
         assert_eq!(&io.written[..4], &REPL_REQUEST_MAGIC);
-        assert_eq!(u32::from_le_bytes(io.written[4..8].try_into().unwrap()), 3);
-        assert_eq!(u32::from_le_bytes(io.written[8..12].try_into().unwrap()), 2);
-        assert_eq!(&io.written[12..], &[0, b'\n', 255, 1, 2]);
+        assert_eq!(u16::from_le_bytes(io.written[4..6].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(io.written[8..12].try_into().unwrap()), 1);
+        assert_eq!(
+            u32::from_le_bytes(io.written[12..16].try_into().unwrap()),
+            3
+        );
+        assert_eq!(
+            u32::from_le_bytes(io.written[16..20].try_into().unwrap()),
+            2
+        );
+        assert_eq!(&io.written[24..], &[0, b'\n', 255, 1, 2]);
+    }
+
+    #[test]
+    fn binary_transport_rejects_bad_response_crc() {
+        let response = encode_repl_response(&ReplResponse {
+            locals: vec![],
+            result: None,
+        })
+        .unwrap();
+        let mut reply = Vec::from(REPL_RESPONSE_MAGIC);
+        reply.extend_from_slice(&FRAME_VERSION.to_le_bytes());
+        reply.extend_from_slice(&0u16.to_le_bytes());
+        reply.extend_from_slice(&1u32.to_le_bytes());
+        reply.extend_from_slice(&0i32.to_le_bytes());
+        reply.extend_from_slice(&(response.len() as u32).to_le_bytes());
+        reply.extend_from_slice(&0xdead_beefu32.to_le_bytes());
+        reply.extend_from_slice(&response);
+        let mut transport = SerialReplTransport::new(CursorIo::new(reply));
+        let error = transport.execute(&[1], &[2]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     struct CursorIo {

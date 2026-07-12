@@ -270,6 +270,41 @@ uint8_t *read_serial_binary(size_t len) {
     return buffer;
 }
 
+void write_repl_response(uint32_t request_id, int32_t status, const uint8_t *data, size_t len) {
+    uint8_t header[REPL_FRAME_HEADER_SIZE] = {};
+    const uint16_t version = REPL_FRAME_VERSION;
+    const uint32_t payload_len = static_cast<uint32_t>(len);
+    const uint32_t crc = rustscript_crc32(data, len);
+    std::memcpy(header, REPL_RESPONSE_MAGIC, 4);
+    std::memcpy(header + 4, &version, sizeof(version));
+    std::memcpy(header + 8, &request_id, sizeof(request_id));
+    std::memcpy(header + 12, &status, sizeof(status));
+    std::memcpy(header + 16, &payload_len, sizeof(payload_len));
+    std::memcpy(header + 20, &crc, sizeof(crc));
+    Serial.write(header, sizeof(header));
+    if (len > 0) {
+        Serial.write(data, len);
+    }
+    Serial.flush();
+}
+
+void discard_serial_until_quiet() {
+    unsigned long quiet_since = millis();
+    while (millis() - quiet_since < 50) {
+        if (Serial.available()) {
+            Serial.read();
+            quiet_since = millis();
+        } else {
+            delay(1);
+        }
+    }
+}
+
+uint32_t repl_request_crc(const uint8_t *program, size_t program_len, const uint8_t *state, size_t state_len) {
+    const uint32_t state_crc = rustscript_crc32(state, state_len);
+    return rustscript_crc32(program, program_len) ^ ((state_crc << 1U) | (state_crc >> 31U));
+}
+
 void rustscript_repl_source() {
     print_repl_help();
     Serial.println("rss:pd-vm> ");
@@ -283,27 +318,46 @@ void rustscript_repl_source() {
             if (!read_serial_payload(frame_header, sizeof(frame_header))) {
                 continue;
             }
-            if (std::memcmp(frame_header, REPL_REQUEST_MAGIC, 4) != 0) {
-                Serial.println("rss:error=invalid-repl-magic");
-                continue;
-            }
+            uint16_t version = 0;
+            uint32_t request_id = 0;
             uint32_t program_len = 0;
             uint32_t state_len = 0;
-            std::memcpy(&program_len, frame_header + 4, sizeof(program_len));
-            std::memcpy(&state_len, frame_header + 8, sizeof(state_len));
+            uint32_t expected_crc = 0;
+            std::memcpy(&version, frame_header + 4, sizeof(version));
+            std::memcpy(&request_id, frame_header + 8, sizeof(request_id));
+            std::memcpy(&program_len, frame_header + 12, sizeof(program_len));
+            std::memcpy(&state_len, frame_header + 16, sizeof(state_len));
+            std::memcpy(&expected_crc, frame_header + 20, sizeof(expected_crc));
+            if (std::memcmp(frame_header, REPL_REQUEST_MAGIC, 4) != 0 ||
+                version != REPL_FRAME_VERSION) {
+                discard_serial_until_quiet();
+                write_repl_response(request_id, RUSTSCRIPT_STATUS_INVALID_ARGUMENT, nullptr, 0);
+                continue;
+            }
             if (program_len == 0 || state_len == 0 ||
                 program_len > REPL_MAX_FRAME_SIZE || state_len > REPL_MAX_FRAME_SIZE ||
                 program_len > REPL_MAX_FRAME_SIZE - state_len) {
-                Serial.println("rss:error=invalid-repl-length");
+                discard_serial_until_quiet();
+                write_repl_response(request_id, RUSTSCRIPT_STATUS_INVALID_ARGUMENT, nullptr, 0);
                 continue;
             }
             uint8_t *program = read_serial_binary(program_len);
             if (program == nullptr) {
+                discard_serial_until_quiet();
+                write_repl_response(request_id, RUSTSCRIPT_STATUS_INVALID_ARGUMENT, nullptr, 0);
                 continue;
             }
             uint8_t *state = read_serial_binary(state_len);
             if (state == nullptr) {
                 std::free(program);
+                discard_serial_until_quiet();
+                write_repl_response(request_id, RUSTSCRIPT_STATUS_INVALID_ARGUMENT, nullptr, 0);
+                continue;
+            }
+            if (repl_request_crc(program, program_len, state, state_len) != expected_crc) {
+                std::free(program);
+                std::free(state);
+                write_repl_response(request_id, RUSTSCRIPT_STATUS_INVALID_REPL_STATE, nullptr, 0);
                 continue;
             }
             rustscript_buffer output = {};
@@ -315,18 +369,10 @@ void rustscript_repl_source() {
             );
             std::free(program);
             std::free(state);
-
-            uint8_t response_header[REPL_FRAME_HEADER_SIZE] = {};
-            std::memcpy(response_header, REPL_RESPONSE_MAGIC, 4);
-            const uint32_t output_len = static_cast<uint32_t>(output.len);
-            std::memcpy(response_header + 4, &status, sizeof(status));
-            std::memcpy(response_header + 8, &output_len, sizeof(output_len));
-            Serial.write(response_header, sizeof(response_header));
+            write_repl_response(request_id, status, output.data, output.len);
             if (output.len > 0) {
-                Serial.write(output.data, output.len);
                 rustscript_buffer_free(output);
             }
-            Serial.flush();
             continue;
         }
 

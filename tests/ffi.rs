@@ -6,10 +6,10 @@ use std::slice;
 use pd_vm_nostd::Value as NoStdValue;
 use rustscript_embedded::{
     ReplTransport, ReplValue, RustScriptBuffer, RustScriptHostCallback, RustScriptValue,
-    RustScriptValueTag, SerialReplSession, rustscript_buffer_free, rustscript_repl_run_vmbc,
-    rustscript_run_vmbc,
+    RustScriptValueTag, SerialReplSession, decode_repl_response, encode_repl_state,
+    rustscript_buffer_free, rustscript_repl_run_vmbc, rustscript_run_vmbc,
 };
-use vm::{compile_source, compile_source_file, encode_program};
+use vm::{OpCode, Program, Value, compile_source, compile_source_file, encode_program};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 struct BoardState {
@@ -252,6 +252,52 @@ impl ReplTransport for FfiReplTransport {
 }
 
 #[test]
+fn repl_ffi_returns_mutated_locals_on_runtime_error() {
+    let program = Program::new(
+        vec![Value::Int(2)],
+        vec![
+            OpCode::Ldc as u8,
+            0,
+            0,
+            0,
+            0,
+            OpCode::Stloc as u8,
+            0,
+            OpCode::Ret as u8,
+        ],
+    )
+    .with_local_count(1);
+    let program = encode_program(&program).unwrap();
+    let mut probe = pd_vm_nostd::Vm::new(pd_vm_nostd::decode_program(&program).unwrap());
+    probe.set_fuel(2);
+    assert!(matches!(
+        probe.run(),
+        Err(pd_vm_nostd::VmError::OutOfFuel { .. })
+    ));
+    assert_eq!(probe.locals()[0], NoStdValue::Int(2));
+    let state = encode_repl_state(&[ReplValue::Null]).unwrap();
+    let mut output = RustScriptBuffer::empty();
+    let status = unsafe {
+        rustscript_repl_run_vmbc(
+            program.as_ptr(),
+            program.len(),
+            state.as_ptr(),
+            state.len(),
+            None,
+            std::ptr::null_mut(),
+            2,
+            &mut output,
+        )
+    };
+    assert_eq!(status, -4);
+    let payload = unsafe { slice::from_raw_parts(output.data, output.len) }.to_vec();
+    unsafe { rustscript_buffer_free(output) };
+    let response = decode_repl_response(&payload).unwrap();
+    assert_eq!(response.locals[0], ReplValue::Int(2));
+    assert_eq!(response.result, None);
+}
+
+#[test]
 fn stateful_repl_runs_line_by_line_through_embedded_ffi() {
     let mut session = SerialReplSession::new();
     let mut transport = FfiReplTransport {
@@ -297,4 +343,42 @@ fn stateful_repl_dispatches_host_calls_through_embedded_ffi() {
     assert_eq!(result, Some(ReplValue::Bool(true)));
     assert_eq!(transport.board.pin, 8);
     assert_eq!(transport.board.gpio_reads, 1);
+}
+
+#[test]
+fn stateful_repl_rejects_moved_optional_string_before_transport() {
+    let mut session = SerialReplSession::new();
+    let mut transport = FfiReplTransport {
+        board: BoardState::default(),
+    };
+    session
+        .eval("let text: string? = \"hello\";", &mut transport)
+        .unwrap();
+    session.eval("let other = text;", &mut transport).unwrap();
+    assert!(session.eval("text", &mut transport).is_err());
+}
+
+#[test]
+fn stateful_repl_round_trips_array_and_map_values() {
+    let mut session = SerialReplSession::new();
+    let mut transport = FfiReplTransport {
+        board: BoardState::default(),
+    };
+    session.eval("let arr = [1, 2];", &mut transport).unwrap();
+    assert_eq!(
+        session.eval("arr", &mut transport).unwrap(),
+        Some(ReplValue::Array(
+            vec![ReplValue::Int(1), ReplValue::Int(2),]
+        ))
+    );
+    session
+        .eval("let map = { \"a\": 1 };", &mut transport)
+        .unwrap();
+    assert_eq!(
+        session.eval("map", &mut transport).unwrap(),
+        Some(ReplValue::Map(vec![(
+            ReplValue::String("a".to_string()),
+            ReplValue::Int(1),
+        )]))
+    );
 }

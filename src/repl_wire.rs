@@ -4,6 +4,8 @@ use alloc::vec::Vec;
 const STATE_MAGIC: &[u8; 4] = b"RSR1";
 const RESPONSE_MAGIC: &[u8; 4] = b"RSO1";
 const MAX_NESTING: usize = 32;
+const MAX_WIRE_BYTES: usize = 128 * 1024;
+const MAX_VALUE_NODES: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReplValue {
@@ -42,10 +44,13 @@ pub fn encode_repl_state(locals: &[ReplValue]) -> Result<Vec<u8>, ReplWireError>
     for value in locals {
         encode_value(value, &mut output, 0)?;
     }
-    Ok(output)
+    ensure_wire_size(output)
 }
 
 pub fn decode_repl_state(bytes: &[u8]) -> Result<Vec<ReplValue>, ReplWireError> {
+    if bytes.len() > MAX_WIRE_BYTES {
+        return Err(ReplWireError::LengthOverflow);
+    }
     let mut decoder = Decoder::new(bytes);
     decoder.expect_magic(STATE_MAGIC)?;
     let count = decoder.read_len()?;
@@ -77,10 +82,13 @@ pub fn encode_repl_response(response: &ReplResponse) -> Result<Vec<u8>, ReplWire
         }
         None => output.push(0),
     }
-    Ok(output)
+    ensure_wire_size(output)
 }
 
 pub fn decode_repl_response(bytes: &[u8]) -> Result<ReplResponse, ReplWireError> {
+    if bytes.len() > MAX_WIRE_BYTES {
+        return Err(ReplWireError::LengthOverflow);
+    }
     let mut decoder = Decoder::new(bytes);
     decoder.expect_magic(RESPONSE_MAGIC)?;
     let count = decoder.read_len()?;
@@ -101,6 +109,14 @@ pub fn decode_repl_response(bytes: &[u8]) -> Result<ReplResponse, ReplWireError>
     };
     decoder.finish()?;
     Ok(ReplResponse { locals, result })
+}
+
+fn ensure_wire_size(output: Vec<u8>) -> Result<Vec<u8>, ReplWireError> {
+    if output.len() > MAX_WIRE_BYTES {
+        Err(ReplWireError::LengthOverflow)
+    } else {
+        Ok(output)
+    }
 }
 
 fn write_len(output: &mut Vec<u8>, length: usize) -> Result<(), ReplWireError> {
@@ -163,11 +179,16 @@ fn encode_value(
 struct Decoder<'a> {
     bytes: &'a [u8],
     offset: usize,
+    nodes: usize,
 }
 
 impl<'a> Decoder<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+        Self {
+            bytes,
+            offset: 0,
+            nodes: 0,
+        }
     }
 
     fn finish(self) -> Result<(), ReplWireError> {
@@ -220,6 +241,13 @@ impl<'a> Decoder<'a> {
     }
 
     fn decode_value(&mut self, depth: usize) -> Result<ReplValue, ReplWireError> {
+        self.nodes = self
+            .nodes
+            .checked_add(1)
+            .ok_or(ReplWireError::LengthOverflow)?;
+        if self.nodes > MAX_VALUE_NODES {
+            return Err(ReplWireError::LengthOverflow);
+        }
         if depth > MAX_NESTING {
             return Err(ReplWireError::NestingTooDeep);
         }
@@ -352,6 +380,14 @@ mod tests {
         array.extend_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(
             decode_repl_state(&array),
+            Err(ReplWireError::LengthOverflow)
+        );
+
+        let mut nodes = STATE_MAGIC.to_vec();
+        nodes.extend_from_slice(&((MAX_VALUE_NODES + 1) as u32).to_le_bytes());
+        nodes.resize(nodes.len() + MAX_VALUE_NODES + 1, 0);
+        assert_eq!(
+            decode_repl_state(&nodes),
             Err(ReplWireError::LengthOverflow)
         );
     }

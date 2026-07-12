@@ -286,11 +286,10 @@ pub unsafe extern "C" fn rustscript_repl_run_vmbc(
         vm.set_fuel(fuel);
     }
     let status = vm_status(vm.run());
-    if status != RUSTSCRIPT_STATUS_OK {
-        return status;
-    }
     let locals = vm.locals().iter().map(embedded_to_repl).collect();
-    let result = vm.stack().last().map(embedded_to_repl);
+    let result = (status == RUSTSCRIPT_STATUS_OK)
+        .then(|| vm.stack().last().map(embedded_to_repl))
+        .flatten();
     let mut encoded = match encode_repl_response(&ReplResponse { locals, result }) {
         Ok(encoded) => encoded,
         Err(_) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
@@ -302,7 +301,7 @@ pub unsafe extern "C" fn rustscript_repl_run_vmbc(
     };
     mem::forget(encoded);
     unsafe { output.write(buffer) }
-    RUSTSCRIPT_STATUS_OK
+    status
 }
 
 /// Release a buffer returned by [`rustscript_repl_run_vmbc`].
