@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Read, Write};
 
-use vm::compiler::{ReplLocalBinding, TypeSchema};
 use vm::compile_source_for_repl_with_locals;
+use vm::compiler::{ReplLocalBinding, TypeSchema};
 
 /// Simple binary format for ReplLocalBinding:
 ///   count(u32 LE) × { name_len(u32 LE) + name(bytes) + mutable(u8) + schema_tag(u8) + optional(u8) }
