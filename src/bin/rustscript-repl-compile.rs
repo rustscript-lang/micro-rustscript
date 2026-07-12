@@ -1,22 +1,10 @@
 use std::io::{self, BufRead, Read, Write};
 
 use vm::compiler::{ReplLocalBinding, TypeSchema};
-use vm::{compile_source_for_repl_with_locals, encode_program};
+use vm::compile_source_for_repl_with_locals;
 
-/// Simple JSON-free binary format for ReplLocalBinding:
+/// Simple binary format for ReplLocalBinding:
 ///   count(u32 LE) × { name_len(u32 LE) + name(bytes) + mutable(u8) + schema_tag(u8) + optional(u8) }
-enum SchemaTag {
-    Null = 0,
-    Int = 1,
-    Float = 2,
-    Bool = 3,
-    String = 4,
-    Bytes = 5,
-    ArrayUnknown = 6,
-    MapUnknown = 7,
-    Unknown = 8,
-}
-
 fn read_u32(reader: &mut &[u8]) -> Option<u32> {
     let (raw, rest) = reader.split_at(4);
     *reader = rest;
