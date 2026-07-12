@@ -31,11 +31,11 @@ jobs:
       contents: read
     env:
       PACKAGE_ORDER: rustscript-embedded
-      PD_VM_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
-      PD_VM_NOSTD_VERSION: ${{ inputs.pd_vm_nostd_version || inputs.pd_vm_version || '0.22.2' }}
-      PD_HOST_FUNCTION_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
+      PD_VM_VERSION: ${{ inputs.pd_vm_version || '0.22.6' }}
+      PD_VM_NOSTD_VERSION: ${{ inputs.pd_vm_nostd_version || inputs.pd_vm_version || '0.22.6' }}
+      PD_HOST_FUNCTION_VERSION: ${{ inputs.pd_vm_version || '0.22.6' }}
       PD_EDGE_ABI_VERSION: 0.1.1
-      WORKSPACE_VERSION_OVERRIDES: micro-rustscript=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }} pd-edge=0.1.1
+      WORKSPACE_VERSION_OVERRIDES: micro-rustscript=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.6' }} pd-edge=0.1.1
     steps:
       - name: Checkout micro-rustscript
         uses: actions/checkout@v4
