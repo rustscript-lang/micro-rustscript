@@ -46,6 +46,12 @@ typedef int32_t (*rustscript_host_callback)(
     rustscript_value *result
 );
 
+typedef struct rustscript_buffer {
+    uint8_t *data;
+    size_t len;
+    size_t capacity;
+} rustscript_buffer;
+
 int32_t rustscript_run_vmbc(
     const uint8_t *program,
     size_t program_len,
@@ -53,6 +59,19 @@ int32_t rustscript_run_vmbc(
     void *context,
     uint64_t fuel
 );
+
+int32_t rustscript_repl_run_vmbc(
+    const uint8_t *program,
+    size_t program_len,
+    const uint8_t *state,
+    size_t state_len,
+    rustscript_host_callback callback,
+    void *context,
+    uint64_t fuel,
+    rustscript_buffer *output
+);
+
+void rustscript_buffer_free(rustscript_buffer buffer);
 
 void *rustscript_platform_alloc(size_t size, size_t align);
 void rustscript_platform_dealloc(void *pointer, size_t size, size_t align);

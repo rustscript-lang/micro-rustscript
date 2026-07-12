@@ -11,6 +11,7 @@ mod allocator;
 mod ffi;
 #[cfg(feature = "host")]
 mod host;
+mod repl_wire;
 
 #[cfg(any(feature = "arduino", feature = "esp32c3", feature = "esp32s31"))]
 pub use ffi::{
@@ -19,3 +20,7 @@ pub use ffi::{
 };
 #[cfg(feature = "host")]
 pub use host::*;
+pub use repl_wire::{
+    ReplResponse, ReplValue, ReplWireError, decode_repl_response, decode_repl_state,
+    encode_repl_response, encode_repl_state,
+};

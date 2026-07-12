@@ -1,8 +1,10 @@
 use alloc::vec::Vec;
 use core::ffi::c_void;
-use core::{ptr, slice, str};
+use core::{mem, ptr, slice, str};
 
 use pd_vm_nostd::{HostError, Value, Vm, VmError, decode_program};
+
+use crate::{ReplResponse, ReplValue, decode_repl_state, encode_repl_response};
 
 pub const RUSTSCRIPT_STATUS_OK: i32 = 0;
 pub const RUSTSCRIPT_STATUS_INVALID_ARGUMENT: i32 = -1;
@@ -10,6 +12,7 @@ pub const RUSTSCRIPT_STATUS_INVALID_VMBC: i32 = -2;
 pub const RUSTSCRIPT_STATUS_HOST_ERROR: i32 = -3;
 pub const RUSTSCRIPT_STATUS_OUT_OF_FUEL: i32 = -4;
 pub const RUSTSCRIPT_STATUS_VM_ERROR: i32 = -5;
+pub const RUSTSCRIPT_STATUS_INVALID_REPL_STATE: i32 = -6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -41,6 +44,24 @@ pub struct RustScriptValue {
     pub float: f64,
     pub data: *const u8,
     pub len: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct RustScriptBuffer {
+    pub data: *mut u8,
+    pub len: usize,
+    pub capacity: usize,
+}
+
+impl RustScriptBuffer {
+    pub const fn empty() -> Self {
+        Self {
+            data: ptr::null_mut(),
+            len: 0,
+            capacity: 0,
+        }
+    }
 }
 
 impl RustScriptValue {
@@ -200,13 +221,156 @@ pub unsafe extern "C" fn rustscript_run_vmbc(
     if fuel != 0 {
         vm.set_fuel(fuel);
     }
-    match vm.run() {
+    vm_status(vm.run())
+}
+
+/// Execute one compiler-produced REPL VMBC snippet with serialized local state.
+///
+/// On success, `output` owns a serialized [`ReplResponse`] buffer. Release it with
+/// [`rustscript_buffer_free`].
+///
+/// # Safety
+///
+/// All non-empty input buffers must point to readable memory for this call's
+/// duration. `output` must point to writable memory and must not already own a
+/// buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rustscript_repl_run_vmbc(
+    program: *const u8,
+    program_len: usize,
+    state: *const u8,
+    state_len: usize,
+    callback: Option<RustScriptHostCallback>,
+    user_context: *mut c_void,
+    fuel: u64,
+    output: *mut RustScriptBuffer,
+) -> i32 {
+    if output.is_null() {
+        return RUSTSCRIPT_STATUS_INVALID_ARGUMENT;
+    }
+    unsafe { output.write(RustScriptBuffer::empty()) }
+    let bytes = match unsafe { borrowed_bytes(program, program_len) } {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => return RUSTSCRIPT_STATUS_INVALID_ARGUMENT,
+    };
+    let state_bytes = match unsafe { borrowed_bytes(state, state_len) } {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => return RUSTSCRIPT_STATUS_INVALID_ARGUMENT,
+    };
+    let program = match decode_program(bytes) {
+        Ok(program) => program,
+        Err(_) => return RUSTSCRIPT_STATUS_INVALID_VMBC,
+    };
+    let locals = match decode_repl_state(state_bytes) {
+        Ok(locals) => locals,
+        Err(_) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
+    };
+    if locals.len() != program.local_count() {
+        return RUSTSCRIPT_STATUS_INVALID_REPL_STATE;
+    }
+    let context = CallbackContext {
+        callback,
+        user_context,
+    };
+    let mut vm = Vm::with_host_dispatcher(program, context, dispatch_host);
+    for (index, value) in locals.into_iter().enumerate() {
+        let value = match repl_to_embedded(value) {
+            Ok(value) => value,
+            Err(()) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
+        };
+        if vm.set_local(index as u8, value).is_err() {
+            return RUSTSCRIPT_STATUS_INVALID_REPL_STATE;
+        }
+    }
+    if fuel != 0 {
+        vm.set_fuel(fuel);
+    }
+    let status = vm_status(vm.run());
+    if status != RUSTSCRIPT_STATUS_OK {
+        return status;
+    }
+    let locals = vm.locals().iter().map(embedded_to_repl).collect();
+    let result = vm.stack().last().map(embedded_to_repl);
+    let mut encoded = match encode_repl_response(&ReplResponse { locals, result }) {
+        Ok(encoded) => encoded,
+        Err(_) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
+    };
+    let buffer = RustScriptBuffer {
+        data: encoded.as_mut_ptr(),
+        len: encoded.len(),
+        capacity: encoded.capacity(),
+    };
+    mem::forget(encoded);
+    unsafe { output.write(buffer) }
+    RUSTSCRIPT_STATUS_OK
+}
+
+/// Release a buffer returned by [`rustscript_repl_run_vmbc`].
+///
+/// # Safety
+///
+/// `buffer` must be empty or previously filled by this crate and must not have
+/// been freed yet.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rustscript_buffer_free(buffer: RustScriptBuffer) {
+    if buffer.data.is_null() {
+        return;
+    }
+    if buffer.capacity < buffer.len {
+        return;
+    }
+    drop(unsafe { Vec::from_raw_parts(buffer.data, buffer.len, buffer.capacity) });
+}
+
+fn vm_status(status: Result<pd_vm_nostd::VmStatus, VmError>) -> i32 {
+    match status {
         Ok(_) => RUSTSCRIPT_STATUS_OK,
         Err(VmError::OutOfFuel { .. }) => RUSTSCRIPT_STATUS_OUT_OF_FUEL,
         Err(VmError::HostError(_) | VmError::HostCallsUnavailable(_)) => {
             RUSTSCRIPT_STATUS_HOST_ERROR
         }
         Err(_) => RUSTSCRIPT_STATUS_VM_ERROR,
+    }
+}
+
+fn repl_to_embedded(value: ReplValue) -> Result<Value, ()> {
+    Ok(match value {
+        ReplValue::Null => Value::Null,
+        ReplValue::Int(value) => Value::Int(value),
+        ReplValue::Float(value) => Value::Float(value),
+        ReplValue::Bool(value) => Value::Bool(value),
+        ReplValue::String(value) => Value::string(value),
+        ReplValue::Bytes(value) => Value::bytes(value),
+        ReplValue::Array(values) => Value::array(
+            values
+                .into_iter()
+                .map(repl_to_embedded)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        ReplValue::Map(entries) => Value::map(
+            entries
+                .into_iter()
+                .map(|(key, value)| Ok((repl_to_embedded(key)?, repl_to_embedded(value)?)))
+                .collect::<Result<Vec<_>, ()>>()?,
+        ),
+    })
+}
+
+fn embedded_to_repl(value: &Value) -> ReplValue {
+    match value {
+        Value::Null => ReplValue::Null,
+        Value::Int(value) => ReplValue::Int(*value),
+        Value::Float(value) => ReplValue::Float(*value),
+        Value::Bool(value) => ReplValue::Bool(*value),
+        Value::String(value) => ReplValue::String(value.as_str().into()),
+        Value::Bytes(value) => ReplValue::Bytes(value.as_ref().clone()),
+        Value::Array(values) => ReplValue::Array(values.iter().map(embedded_to_repl).collect()),
+        Value::Map(entries) => ReplValue::Map(
+            entries
+                .iter()
+                .map(|(key, value)| (embedded_to_repl(key), embedded_to_repl(value)))
+                .collect(),
+        ),
     }
 }
 

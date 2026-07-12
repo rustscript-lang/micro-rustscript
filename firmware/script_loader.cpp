@@ -249,25 +249,78 @@ void rustscript_free_image(RustScriptImage *image) {
     image->source = nullptr;
 }
 
+void rustscript_repl_source();
 void rustscript_repl() {
+    rustscript_repl_source();
+}
+
+uint8_t *read_serial_binary(size_t len) {
+    if (len == 0) {
+        return nullptr;
+    }
+    auto *buffer = static_cast<uint8_t *>(std::malloc(len));
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+    if (!read_serial_payload(buffer, len)) {
+        Serial.println("rss:error=payload-timeout");
+        std::free(buffer);
+        return nullptr;
+    }
+    return buffer;
+}
+
+void rustscript_repl_source() {
     print_repl_help();
+    Serial.println("rss:pd-vm> ");
     while (true) {
         if (!Serial.available()) {
             delay(10);
             continue;
         }
-        String line = Serial.readStringUntil('\n');
-        line.trim();
-        if (line.length() == 0 || line.length() > MAX_REPL_LINE) {
+        String header = Serial.readStringUntil('\n');
+        header.trim();
+        if (header.length() == 0) {
             continue;
         }
+        // Binary protocol
+        if (header.startsWith(REPL_MAGIC) && header.length() == strlen(REPL_MAGIC) + 8) {
+            const uint32_t program_len = *reinterpret_cast<const uint32_t *>(header.c_str() + 4);
+            const uint32_t state_len = *reinterpret_cast<const uint32_t *>(header.c_str() + 8);
+            uint8_t *program = read_serial_binary(program_len);
+            if (program == nullptr) continue;
+            uint8_t *state = state_len > 0 ? read_serial_binary(state_len) : nullptr;
+            if (state_len > 0 && state == nullptr) {
+                std::free(program);
+                continue;
+            }
+            rustscript_buffer output = {};
+            const int32_t status = rustscript_repl_run_vmbc(
+                program, program_len,
+                state, state_len,
+                rustscript_dispatch_host, nullptr, 1000000,
+                &output
+            );
+            std::free(program);
+            std::free(state);
+            if (output.len > 0) {
+                Serial.printf("rss:%c%04x", 'D', static_cast<unsigned>(output.len));
+                Serial.write(output.data, output.len);
+                rustscript_buffer_free(output);
+            } else {
+                Serial.printf("rss:repl-status=%d\n", static_cast<int>(status));
+            }
+            Serial.print("rss:pd-vm> ");
+            continue;
+        }
+        // Legacy commands
         size_t len = 0;
         uint32_t crc = 0;
-        if (parse_transfer_command(line, "load", &len, &crc)) {
+        if (parse_transfer_command(header, "load", &len, &crc)) {
             receive_repl_payload(len, crc, false);
-        } else if (parse_transfer_command(line, "install", &len, &crc)) {
+        } else if (parse_transfer_command(header, "install", &len, &crc)) {
             receive_repl_payload(len, crc, true);
-        } else if (line == "run") {
+        } else if (header == "run") {
             RustScriptImage image{};
             if (rustscript_load_partition(&image)) {
                 run_repl_payload(image.data, image.len);
@@ -275,7 +328,7 @@ void rustscript_repl() {
             } else {
                 Serial.println("rss:error=no-partition-script");
             }
-        } else if (line == "info") {
+        } else if (header == "info") {
             const esp_partition_t *partition = script_partition();
             if (partition == nullptr) {
                 Serial.println("rss:partition=missing");
@@ -286,10 +339,11 @@ void rustscript_repl() {
                     static_cast<unsigned long>(partition->size)
                 );
             }
-        } else if (line == "help") {
+        } else if (header == "help") {
             print_repl_help();
         } else {
             Serial.println("rss:error=unknown-command");
         }
     }
 }
+

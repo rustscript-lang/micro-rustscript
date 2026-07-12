@@ -15,6 +15,11 @@ name = "rustscript-compile-vmbc"
 path = "src/bin/rustscript-compile-vmbc.rs"
 required-features = ["host"]
 
+[[bin]]
+name = "rustscript-repl-compile"
+path = "src/bin/rustscript-repl-compile.rs"
+required-features = ["host"]
+
 [features]
 default = ["host"]
 host = ["dep:vm", "vm/runtime"]
