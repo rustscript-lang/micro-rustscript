@@ -120,20 +120,40 @@ RSS input compilation uses `rustscript-compile-vmbc` from `PATH`, or the compile
 checkout through Cargo. A raw `.vmbc` file can be copied directly to the SD path; SD files do not
 use the flash-partition header.
 
-## Serial VMBC REPL
+## Serial REPL
 
-When neither startup source exists, the firmware presents a VMBC-oriented serial REPL. Commands are
-`load`, `install`, `run`, `info`, and `help`. `load` executes a transferred VMBC payload without
-writing flash; `install` writes the script partition first. The helper implements the binary framing:
+When neither startup source exists, the firmware accepts both the legacy VMBC commands and an
+interactive source REPL. Build and start the source REPL on the development machine:
+
+```bash
+cargo build --release --bin rustscript-serial-repl
+./target/release/rustscript-serial-repl /dev/ttyACM0 115200
+```
+
+The prompt follows `pd-vm-run`: enter one expression or statement at a time and expression results
+are printed immediately. Bindings, mutations, type metadata, and moved-value state carry across
+entries. Delimiter-based multiline input uses the `...>` prompt; `.cancel` clears pending input,
+`.clear` clears session locals, and `.quit` exits.
+
+```text
+rss> let mut x = 40;
+rss> x = x + 2;
+rss> x
+=> 42
+```
+
+Source compilation stays on the development machine. Each entry is sent as VMBC plus its current
+local values using fixed-length binary frames; the firmware contains only the decoder and
+interpreter.
+
+The existing `load`, `install`, `run`, `info`, and `help` commands remain available. To send a
+precompiled payload directly:
 
 ```bash
 python -m pip install pyserial
 python scripts/repl_vmbc.py app.vmbc --port /dev/ttyACM0
 python scripts/repl_vmbc.py app.vmbc --port /dev/ttyACM0 --install
 ```
-
-Source compilation stays on the development machine; the firmware image contains the decoder and
-interpreter, without the desktop compiler.
 
 ## Build
 

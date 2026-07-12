@@ -278,19 +278,31 @@ void rustscript_repl_source() {
             delay(10);
             continue;
         }
-        String header = Serial.readStringUntil('\n');
-        header.trim();
-        if (header.length() == 0) {
-            continue;
-        }
-        // Binary protocol
-        if (header.startsWith(REPL_MAGIC) && header.length() == strlen(REPL_MAGIC) + 8) {
-            const uint32_t program_len = *reinterpret_cast<const uint32_t *>(header.c_str() + 4);
-            const uint32_t state_len = *reinterpret_cast<const uint32_t *>(header.c_str() + 8);
+        if (Serial.peek() == 'R') {
+            uint8_t frame_header[REPL_FRAME_HEADER_SIZE] = {};
+            if (!read_serial_payload(frame_header, sizeof(frame_header))) {
+                continue;
+            }
+            if (std::memcmp(frame_header, REPL_REQUEST_MAGIC, 4) != 0) {
+                Serial.println("rss:error=invalid-repl-magic");
+                continue;
+            }
+            uint32_t program_len = 0;
+            uint32_t state_len = 0;
+            std::memcpy(&program_len, frame_header + 4, sizeof(program_len));
+            std::memcpy(&state_len, frame_header + 8, sizeof(state_len));
+            if (program_len == 0 || state_len == 0 ||
+                program_len > REPL_MAX_FRAME_SIZE || state_len > REPL_MAX_FRAME_SIZE ||
+                program_len > REPL_MAX_FRAME_SIZE - state_len) {
+                Serial.println("rss:error=invalid-repl-length");
+                continue;
+            }
             uint8_t *program = read_serial_binary(program_len);
-            if (program == nullptr) continue;
-            uint8_t *state = state_len > 0 ? read_serial_binary(state_len) : nullptr;
-            if (state_len > 0 && state == nullptr) {
+            if (program == nullptr) {
+                continue;
+            }
+            uint8_t *state = read_serial_binary(state_len);
+            if (state == nullptr) {
                 std::free(program);
                 continue;
             }
@@ -303,14 +315,24 @@ void rustscript_repl_source() {
             );
             std::free(program);
             std::free(state);
+
+            uint8_t response_header[REPL_FRAME_HEADER_SIZE] = {};
+            std::memcpy(response_header, REPL_RESPONSE_MAGIC, 4);
+            const uint32_t output_len = static_cast<uint32_t>(output.len);
+            std::memcpy(response_header + 4, &status, sizeof(status));
+            std::memcpy(response_header + 8, &output_len, sizeof(output_len));
+            Serial.write(response_header, sizeof(response_header));
             if (output.len > 0) {
-                Serial.printf("rss:%c%04x", 'D', static_cast<unsigned>(output.len));
                 Serial.write(output.data, output.len);
                 rustscript_buffer_free(output);
-            } else {
-                Serial.printf("rss:repl-status=%d\n", static_cast<int>(status));
             }
-            Serial.print("rss:pd-vm> ");
+            Serial.flush();
+            continue;
+        }
+
+        String header = Serial.readStringUntil('\n');
+        header.trim();
+        if (header.length() == 0) {
             continue;
         }
         // Legacy commands

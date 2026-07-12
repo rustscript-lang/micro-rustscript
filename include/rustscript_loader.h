@@ -22,15 +22,10 @@ void rustscript_repl();
 }
 #endif
 
-#define REPL_MAGIC "RSSR"
-#define REPL_LEN_SIZE 4
-#define REPL_CMD_HELLO  1
-#define REPL_CMD_HELLO_RESPONSE 2
-#define REPL_CMD_PAYLOAD 3
-#define REPL_CMD_PAYLOAD_RESPONSE 4
-#define REPL_CMD_ERROR  5
+#define REPL_REQUEST_MAGIC "RSSQ"
+#define REPL_RESPONSE_MAGIC "RSSP"
+#define REPL_FRAME_HEADER_SIZE 12
+#define REPL_MAX_FRAME_SIZE (16U * 1024U * 1024U)
 
-// Power-on state: send HELLO -> receive HELLO_RESPONSE (or timeout -> legacy PROMPT).
-// Main loop: send PAYLOAD (program_len + state_len + program + state)
-//        -> receive PAYLOAD_RESPONSE (status_code + response_len + response)
-//        or ERROR (message_len + message).
+// Request:  "RSSQ" + program_len(u32 LE) + state_len(u32 LE) + program + state.
+// Response: "RSSP" + status(i32 LE) + response_len(u32 LE) + response.

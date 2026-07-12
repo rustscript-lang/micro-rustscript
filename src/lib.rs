@@ -11,15 +11,19 @@ mod allocator;
 mod ffi;
 #[cfg(feature = "host")]
 mod host;
+#[cfg(feature = "host")]
+mod repl_client;
 mod repl_wire;
 
 #[cfg(any(feature = "arduino", feature = "esp32c3", feature = "esp32s31"))]
 pub use ffi::{
-    RustScriptHostCallback, RustScriptValue, RustScriptValueError, RustScriptValueTag,
-    rustscript_run_vmbc,
+    RustScriptBuffer, RustScriptHostCallback, RustScriptValue, RustScriptValueError,
+    RustScriptValueTag, rustscript_buffer_free, rustscript_repl_run_vmbc, rustscript_run_vmbc,
 };
 #[cfg(feature = "host")]
 pub use host::*;
+#[cfg(feature = "host")]
+pub use repl_client::*;
 pub use repl_wire::{
     ReplResponse, ReplValue, ReplWireError, decode_repl_response, decode_repl_state,
     encode_repl_response, encode_repl_state,

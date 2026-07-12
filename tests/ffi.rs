@@ -5,7 +5,9 @@ use std::slice;
 
 use pd_vm_nostd::Value as NoStdValue;
 use rustscript_embedded::{
-    RustScriptHostCallback, RustScriptValue, RustScriptValueTag, rustscript_run_vmbc,
+    ReplTransport, ReplValue, RustScriptBuffer, RustScriptHostCallback, RustScriptValue,
+    RustScriptValueTag, SerialReplSession, rustscript_buffer_free, rustscript_repl_run_vmbc,
+    rustscript_run_vmbc,
 };
 use vm::{compile_source, compile_source_file, encode_program};
 
@@ -51,7 +53,7 @@ unsafe extern "C" fn host_callback(
             state.gpio_writes += 1;
             unsafe { set_bool_result(result, true) }
         }
-        b"gpio::digital_read"
+        b"gpio::digital_read" | b"gpio_digital_read"
             if args.len() == 1 && args[0].tag == RustScriptValueTag::Int as u8 =>
         {
             state.pin = args[0].integer;
@@ -218,4 +220,81 @@ fn framework_namespace_imports_compile_correctly() {
 fn c_abi_rejects_null_program_pointer() {
     let status = unsafe { rustscript_run_vmbc(std::ptr::null(), 4, None, std::ptr::null_mut(), 0) };
     assert_eq!(status, -1);
+}
+
+struct FfiReplTransport {
+    board: BoardState,
+}
+
+impl ReplTransport for FfiReplTransport {
+    fn execute(&mut self, program: &[u8], state: &[u8]) -> std::io::Result<(i32, Vec<u8>)> {
+        let mut output = RustScriptBuffer::empty();
+        let status = unsafe {
+            rustscript_repl_run_vmbc(
+                program.as_ptr(),
+                program.len(),
+                state.as_ptr(),
+                state.len(),
+                Some(host_callback),
+                (&mut self.board as *mut BoardState).cast(),
+                100_000,
+                &mut output,
+            )
+        };
+        let payload = if output.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { slice::from_raw_parts(output.data, output.len) }.to_vec()
+        };
+        unsafe { rustscript_buffer_free(output) };
+        Ok((status, payload))
+    }
+}
+
+#[test]
+fn stateful_repl_runs_line_by_line_through_embedded_ffi() {
+    let mut session = SerialReplSession::new();
+    let mut transport = FfiReplTransport {
+        board: BoardState::default(),
+    };
+
+    assert_eq!(
+        session.eval("let mut x = 40;", &mut transport).unwrap(),
+        None
+    );
+    assert_eq!(
+        session
+            .eval(
+                "fn gpio_digital_read(pin: int) -> bool; gpio_digital_read(8)",
+                &mut transport,
+            )
+            .unwrap(),
+        Some(ReplValue::Bool(false))
+    );
+    assert_eq!(session.eval("x = x + 2;", &mut transport).unwrap(), None);
+    assert_eq!(
+        session.eval("x", &mut transport).unwrap(),
+        Some(ReplValue::Int(42))
+    );
+}
+
+#[test]
+fn stateful_repl_dispatches_host_calls_through_embedded_ffi() {
+    let mut session = SerialReplSession::new();
+    let mut transport = FfiReplTransport {
+        board: BoardState {
+            high: true,
+            ..BoardState::default()
+        },
+    };
+
+    let result = session
+        .eval(
+            "fn gpio_digital_read(pin: int) -> bool; gpio_digital_read(8)",
+            &mut transport,
+        )
+        .unwrap();
+    assert_eq!(result, Some(ReplValue::Bool(true)));
+    assert_eq!(transport.board.pin, 8);
+    assert_eq!(transport.board.gpio_reads, 1);
 }

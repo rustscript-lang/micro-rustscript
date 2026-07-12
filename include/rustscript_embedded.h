@@ -16,6 +16,7 @@ enum rustscript_status {
     RUSTSCRIPT_STATUS_HOST_ERROR = -3,
     RUSTSCRIPT_STATUS_OUT_OF_FUEL = -4,
     RUSTSCRIPT_STATUS_VM_ERROR = -5,
+    RUSTSCRIPT_STATUS_INVALID_REPL_STATE = -6,
 };
 
 enum rustscript_value_tag {

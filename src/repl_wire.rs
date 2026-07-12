@@ -49,6 +49,9 @@ pub fn decode_repl_state(bytes: &[u8]) -> Result<Vec<ReplValue>, ReplWireError> 
     let mut decoder = Decoder::new(bytes);
     decoder.expect_magic(STATE_MAGIC)?;
     let count = decoder.read_len()?;
+    if count > decoder.remaining() {
+        return Err(ReplWireError::LengthOverflow);
+    }
     let mut locals = Vec::new();
     locals
         .try_reserve_exact(count)
@@ -81,6 +84,9 @@ pub fn decode_repl_response(bytes: &[u8]) -> Result<ReplResponse, ReplWireError>
     let mut decoder = Decoder::new(bytes);
     decoder.expect_magic(RESPONSE_MAGIC)?;
     let count = decoder.read_len()?;
+    if count > decoder.remaining() {
+        return Err(ReplWireError::LengthOverflow);
+    }
     let mut locals = Vec::new();
     locals
         .try_reserve_exact(count)
@@ -172,6 +178,10 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.offset)
+    }
+
     fn expect_magic(&mut self, expected: &[u8; 4]) -> Result<(), ReplWireError> {
         if self.read_exact(expected.len())? == expected {
             Ok(())
@@ -246,6 +256,9 @@ impl<'a> Decoder<'a> {
             }
             6 => {
                 let count = self.read_len()?;
+                if count > self.remaining() {
+                    return Err(ReplWireError::LengthOverflow);
+                }
                 let mut values = Vec::new();
                 values
                     .try_reserve_exact(count)
@@ -257,6 +270,9 @@ impl<'a> Decoder<'a> {
             }
             7 => {
                 let count = self.read_len()?;
+                if count > self.remaining() / 2 {
+                    return Err(ReplWireError::LengthOverflow);
+                }
                 let mut entries = Vec::new();
                 entries
                     .try_reserve_exact(count)
@@ -318,6 +334,25 @@ mod tests {
         assert_eq!(
             decode_repl_state(&trailing),
             Err(ReplWireError::TrailingData)
+        );
+    }
+
+    #[test]
+    fn decoder_rejects_impossible_collection_lengths_before_allocating() {
+        let mut state = STATE_MAGIC.to_vec();
+        state.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            decode_repl_state(&state),
+            Err(ReplWireError::LengthOverflow)
+        );
+
+        let mut array = STATE_MAGIC.to_vec();
+        array.extend_from_slice(&1u32.to_le_bytes());
+        array.push(6);
+        array.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            decode_repl_state(&array),
+            Err(ReplWireError::LengthOverflow)
         );
     }
 }
