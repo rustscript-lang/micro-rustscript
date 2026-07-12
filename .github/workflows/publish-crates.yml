@@ -32,7 +32,7 @@ jobs:
     env:
       PACKAGE_ORDER: rustscript-embedded
       PD_VM_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
-      PD_VM_NOSTD_VERSION: ${{ inputs.pd_vm_nostd_version || '0.1.0' }}
+      PD_VM_NOSTD_VERSION: ${{ inputs.pd_vm_nostd_version || inputs.pd_vm_version || '0.22.2' }}
       PD_HOST_FUNCTION_VERSION: ${{ inputs.pd_vm_version || '0.22.2' }}
       PD_EDGE_ABI_VERSION: 0.1.1
       WORKSPACE_VERSION_OVERRIDES: micro-rustscript=${{ inputs.version }} rustscript=${{ inputs.pd_vm_version || '0.22.2' }} pd-edge=0.1.1
@@ -100,7 +100,7 @@ jobs:
                   if section in ('[workspace.package]', '[package]') and stripped.startswith('version = '):
                       line = re.sub(r'version\s*=\s*"[^"]*"', f'version = "{manifest_version}"', line)
                   match = dep_re.match(line)
-                  if match and 'path' in match.group(3):
+                  if match and ('path' in match.group(3) or 'git' in match.group(3)):
                       prefix, key, body, suffix = match.groups()
                       package_match = re.search(r'package\s*=\s*"([^"]+)"', body)
                       dep_name = package_match.group(1) if package_match else key
@@ -113,6 +113,10 @@ jobs:
                               if body and not body.endswith(','):
                                   body += ','
                               body += f' version = "{dep_version}"'
+                          # Remove git source pins so published packages use crates.io releases.
+                          body = re.sub(r'\s*,?\s*git\s*=\s*"[^"]*"', '', body)
+                          body = re.sub(r'\s*,?\s*rev\s*=\s*"[^"]*"', '', body)
+                          body = re.sub(r',\s*,', ',', body)
                           line = prefix + body + suffix
                   out.append(line)
               path.write_text('\n'.join(out) + '\n')
