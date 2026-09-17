@@ -103,7 +103,9 @@ impl RustScriptValue {
                 output.data = value.as_ptr();
                 output.len = value.len();
             }
-            Value::Array(_) | Value::Map(_) => return Err(RustScriptValueError::UnsupportedType),
+            Value::Array(_) | Value::Map(_) | Value::Callable(_) => {
+                return Err(RustScriptValueError::UnsupportedType);
+            }
         }
         Ok(output)
     }
@@ -286,10 +288,26 @@ pub unsafe extern "C" fn rustscript_repl_run_vmbc(
         vm.set_fuel(fuel);
     }
     let status = vm_status(vm.run());
-    let locals = vm.locals().iter().map(embedded_to_repl).collect();
-    let result = (status == RUSTSCRIPT_STATUS_OK)
-        .then(|| vm.stack().last().map(embedded_to_repl))
-        .flatten();
+    let locals = match vm
+        .locals()
+        .iter()
+        .map(embedded_to_repl)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(locals) => locals,
+        Err(()) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
+    };
+    let result = if status == RUSTSCRIPT_STATUS_OK {
+        match vm.stack().last() {
+            Some(value) => match embedded_to_repl(value) {
+                Ok(value) => Some(value),
+                Err(()) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
     let mut encoded = match encode_repl_response(&ReplResponse { locals, result }) {
         Ok(encoded) => encoded,
         Err(_) => return RUSTSCRIPT_STATUS_INVALID_REPL_STATE,
@@ -355,22 +373,28 @@ fn repl_to_embedded(value: ReplValue) -> Result<Value, ()> {
     })
 }
 
-fn embedded_to_repl(value: &Value) -> ReplValue {
-    match value {
+fn embedded_to_repl(value: &Value) -> Result<ReplValue, ()> {
+    Ok(match value {
         Value::Null => ReplValue::Null,
         Value::Int(value) => ReplValue::Int(*value),
         Value::Float(value) => ReplValue::Float(*value),
         Value::Bool(value) => ReplValue::Bool(*value),
         Value::String(value) => ReplValue::String(value.as_str().into()),
         Value::Bytes(value) => ReplValue::Bytes(value.as_ref().clone()),
-        Value::Array(values) => ReplValue::Array(values.iter().map(embedded_to_repl).collect()),
+        Value::Array(values) => ReplValue::Array(
+            values
+                .iter()
+                .map(embedded_to_repl)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         Value::Map(entries) => ReplValue::Map(
             entries
                 .iter()
-                .map(|(key, value)| (embedded_to_repl(key), embedded_to_repl(value)))
-                .collect(),
+                .map(|(key, value)| Ok((embedded_to_repl(key)?, embedded_to_repl(value)?)))
+                .collect::<Result<Vec<_>, ()>>()?,
         ),
-    }
+        Value::Callable(_) => return Err(()),
+    })
 }
 
 unsafe fn borrowed_bytes<'a>(
