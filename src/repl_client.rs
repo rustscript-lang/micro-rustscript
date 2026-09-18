@@ -390,8 +390,29 @@ fn locals_moved_by_rebinding(
                 .is_some_and(|value| value == &vm::Value::Null)
                 && program.code.get(ip + 7).copied() == Some(OpCode::Stloc as u8)
                 && program.code.get(ip + 8).copied() == Some(source);
-            if null_store {
+            let detach_local = program
+                .code
+                .get(ip + 2)
+                .copied()
+                .and_then(|byte| OpCode::try_from(byte).ok())
+                .filter(|opcode| *opcode == OpCode::Ldc)
+                .and_then(|_| program.code.get(ip + 3..ip + 7))
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)
+                .and_then(|index| program.constants.get(index as usize))
+                .is_some_and(|value| value == &vm::Value::Int(i64::from(source)))
+                && program.code.get(ip + 7).copied() == Some(OpCode::Call as u8)
+                && program
+                    .code
+                    .get(ip + 8..ip + 10)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u16::from_le_bytes)
+                    == Some(vm::BuiltinFunction::DetachLocal.call_index())
+                && program.code.get(ip + 10).copied() == Some(1);
+            if null_store || detach_local {
                 moved.insert(name.clone());
+            }
+            if null_store {
                 move_store_offsets.insert(ip + 7);
             }
         }
@@ -457,6 +478,10 @@ fn schema_from_value_type(value_type: ValueType) -> Option<TypeSchema> {
         ValueType::Bytes => Some(TypeSchema::Bytes),
         ValueType::Array => Some(TypeSchema::Array(Box::new(TypeSchema::Unknown))),
         ValueType::Map => Some(TypeSchema::Map(Box::new(TypeSchema::Unknown))),
+        ValueType::Callable => Some(TypeSchema::Callable {
+            params: Vec::new(),
+            result: Box::new(TypeSchema::Unknown),
+        }),
     }
 }
 
@@ -668,6 +693,9 @@ mod tests {
                     .map(|(key, value)| (from_vm_value(key), from_vm_value(value)))
                     .collect(),
             ),
+            vm::Value::Callable(_) => {
+                panic!("firmware REPL wire format does not encode callable values")
+            }
         }
     }
 
@@ -734,6 +762,19 @@ mod tests {
         let mut transport = VmTransport::default();
         session
             .eval("let text = \"hello\";", &mut transport)
+            .unwrap();
+        session.eval("let other = text;", &mut transport).unwrap();
+        let calls = transport.calls;
+        assert!(session.eval("text", &mut transport).is_err());
+        assert_eq!(transport.calls, calls);
+    }
+
+    #[test]
+    fn moved_optional_string_is_rejected_before_device_write() {
+        let mut session = SerialReplSession::new();
+        let mut transport = VmTransport::default();
+        session
+            .eval("let text: string? = \"hello\";", &mut transport)
             .unwrap();
         session.eval("let other = text;", &mut transport).unwrap();
         let calls = transport.calls;
