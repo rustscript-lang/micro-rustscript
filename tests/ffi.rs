@@ -352,7 +352,10 @@ fn stateful_repl_rejects_moved_optional_string_before_transport() {
         board: BoardState::default(),
     };
     session
-        .eval("let text: string? = \"hello\";", &mut transport)
+        .eval(
+            "let text: Option<string> = Option::Some(\"hello\");",
+            &mut transport,
+        )
         .unwrap();
     session.eval("let other = text;", &mut transport).unwrap();
     assert!(session.eval("text", &mut transport).is_err());

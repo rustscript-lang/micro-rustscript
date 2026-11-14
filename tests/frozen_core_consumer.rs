@@ -9,7 +9,7 @@ use std::process::Command;
 use rustscript_embedded::{RunOutcome, run_source_file};
 use vm::{compile_source_file, decode_program, encode_program};
 
-const FROZEN_RUSTSCRIPT_REV: &str = "b1d6cffede77f49410bf63525f30b9a46b02dc01";
+const FROZEN_RUSTSCRIPT_REV: &str = "fc8b0c8179640a8ffe460a64b3690e35c2f7eb73";
 const RUSTSCRIPT_GIT: &str = "https://github.com/rustscript-lang/rustscript.git";
 const EXPECTED_BUNDLED_RSS: usize = 4;
 const REQUIRED_LOCK_PACKAGES: &[&str] =
@@ -72,6 +72,13 @@ fn manifest_dir() -> PathBuf {
 
 fn rustscript_lock_source() -> String {
     format!("git+{RUSTSCRIPT_GIT}?rev={FROZEN_RUSTSCRIPT_REV}#{FROZEN_RUSTSCRIPT_REV}")
+}
+
+/// The VMBC header stores magic then the wire version; bumping the encoded
+/// version guarantees an unsupported version whichever one `encode_program`
+/// currently emits.
+fn unsupported_wire_version(bytes: &[u8]) -> u16 {
+    u16::from_le_bytes([bytes[4], bytes[5]]).wrapping_add(1)
 }
 
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -364,7 +371,7 @@ fn vmbc_guest_sections_parse_or_reject_and_host_state_stays_off_the_wire() {
     }
 
     let mut unsupported = bytes.clone();
-    unsupported[4..6].copy_from_slice(&14u16.to_le_bytes());
+    unsupported[4..6].copy_from_slice(&unsupported_wire_version(&bytes).to_le_bytes());
     decode_program(&unsupported).expect_err("unsupported VMBC version must reject");
 
     let mut trailing = bytes.clone();
@@ -394,7 +401,7 @@ mod nostd_wire {
         }
 
         let mut unsupported = bytes.clone();
-        unsupported[4..6].copy_from_slice(&14u16.to_le_bytes());
+        unsupported[4..6].copy_from_slice(&unsupported_wire_version(&bytes).to_le_bytes());
         decode_nostd(&unsupported).expect_err("no_std decoder must reject unsupported version");
 
         let mut trailing = bytes.clone();
