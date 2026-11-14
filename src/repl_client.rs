@@ -774,7 +774,10 @@ mod tests {
         let mut session = SerialReplSession::new();
         let mut transport = VmTransport::default();
         session
-            .eval("let text: string? = \"hello\";", &mut transport)
+            .eval(
+                "let text: Option<string> = Option::Some(\"hello\");",
+                &mut transport,
+            )
             .unwrap();
         session.eval("let other = text;", &mut transport).unwrap();
         let calls = transport.calls;
