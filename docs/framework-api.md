@@ -48,7 +48,7 @@ from the firmware. The Arduino host simulator never registers either module.
 
 The signatures below are RSS signatures. Argument type, arity, and range checks happen in the host
 bridge. A rejected call returns a host-dispatch error to the VM. A `bool` result reports whether the
-underlying platform operation was accepted. Calls documented as `null` are commands whose success
+underlying platform operation was accepted. Calls documented as `()` are commands whose success
 is represented by normal completion.
 
 ## GPIO
@@ -78,7 +78,7 @@ ESP32-C3 only:
 use i2c;
 
 i2c::open(sda: int, scl: int, frequency: int) -> bool
-i2c::close() -> null
+i2c::close() -> ()
 i2c::transmit(address: int, data: bytes) -> int
 i2c::transmit_register(address: int, register: int, data: bytes) -> int
 i2c::receive(address: int, length: int) -> bytes
@@ -95,16 +95,16 @@ empty byte sequence.
 ```rust
 use mcu;
 
-mcu::delay_ms(duration: int) -> null
-mcu::delay_us(duration: int) -> null
+mcu::delay_ms(duration: int) -> ()
+mcu::delay_us(duration: int) -> ()
 mcu::millis() -> int
 mcu::micros() -> int
 mcu::cpu_frequency_mhz() -> int
 mcu::free_heap() -> int
 mcu::flash_size() -> int
 mcu::random() -> int
-mcu::restart() -> null
-mcu::deep_sleep_us(duration: int) -> null
+mcu::restart() -> ()
+mcu::deep_sleep_us(duration: int) -> ()
 ```
 
 On ESP32-C3, `delay_ms` accepts `0..60,000`, `delay_us` accepts `0..1,000,000`, and deep sleep
@@ -117,7 +117,7 @@ millisecond value. `millis` and `micros` are monotonic uptime counters. `restart
 ```rust
 use serial;
 
-serial::write_line(value: string) -> null
+serial::write_line(value: string) -> ()
 serial::available() -> int
 serial::read_bytes(maximum: int) -> bytes
 ```
@@ -172,7 +172,7 @@ The Rust static library exports `rustscript_run_vmbc` and value types from
 (context, import_name_bytes, arguments, result) -> status
 ```
 
-A callback status of `-1` rejects the call, `0` completes a command with `null`, and `1` returns the
+A callback status of `-1` rejects the call, `0` completes a command with `()`, and `1` returns the
 value written to `result`. String and byte results reference bridge-owned storage and are consumed by
 the VM during the call. Platform implementations are located in:
 
