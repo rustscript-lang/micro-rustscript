@@ -775,7 +775,7 @@ mod tests {
         let mut transport = VmTransport::default();
         session
             .eval(
-                "let text: Option<string> = Option::Some(\"hello\");",
+                "let text: Option<string> = Some(\"hello\");",
                 &mut transport,
             )
             .unwrap();

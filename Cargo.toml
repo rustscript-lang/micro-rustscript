@@ -30,9 +30,9 @@ wifi = []
 bluetooth = []
 
 [dependencies]
-pd_vm_nostd = { package = "pd-vm-nostd", git = "https://github.com/rustscript-lang/rustscript.git", rev = "fc8b0c8179640a8ffe460a64b3690e35c2f7eb73", version = "0.1.0", optional = true }
+pd_vm_nostd = { package = "pd-vm-nostd", git = "https://github.com/rustscript-lang/rustscript.git", rev = "2f433edab3f1907e8cb060e901357d7e2af016ce", version = "0.1.0", optional = true }
 serialport = { version = "4.8.1", default-features = false, optional = true }
-vm = { package = "pd-vm", git = "https://github.com/rustscript-lang/rustscript.git", rev = "fc8b0c8179640a8ffe460a64b3690e35c2f7eb73", version = "0.1.0", default-features = false, optional = true }
+vm = { package = "pd-vm", git = "https://github.com/rustscript-lang/rustscript.git", rev = "2f433edab3f1907e8cb060e901357d7e2af016ce", version = "0.1.0", default-features = false, optional = true }
 
 [profile.release]
 opt-level = "z"

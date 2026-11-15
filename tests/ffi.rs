@@ -353,7 +353,7 @@ fn stateful_repl_rejects_moved_optional_string_before_transport() {
     };
     session
         .eval(
-            "let text: Option<string> = Option::Some(\"hello\");",
+            "let text: Option<string> = Some(\"hello\");",
             &mut transport,
         )
         .unwrap();
