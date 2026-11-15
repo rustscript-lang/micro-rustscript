@@ -9,7 +9,7 @@ use std::process::Command;
 use rustscript_embedded::{RunOutcome, run_source_file};
 use vm::{compile_source_file, decode_program, encode_program};
 
-const FROZEN_RUSTSCRIPT_REV: &str = "fc8b0c8179640a8ffe460a64b3690e35c2f7eb73";
+const FROZEN_RUSTSCRIPT_REV: &str = "2f433edab3f1907e8cb060e901357d7e2af016ce";
 const RUSTSCRIPT_GIT: &str = "https://github.com/rustscript-lang/rustscript.git";
 const EXPECTED_BUNDLED_RSS: usize = 4;
 const REQUIRED_LOCK_PACKAGES: &[&str] =
